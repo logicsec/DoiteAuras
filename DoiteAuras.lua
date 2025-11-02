@@ -10,6 +10,57 @@ if DoiteAurasFrame then return end
 DoiteAurasDB = DoiteAurasDB or {}
 DoiteAurasDB.spells   = DoiteAurasDB.spells   or {}
 DoiteAurasDB.cache = DoiteAurasDB.cache or {}
+DoiteAuras = DoiteAuras or {}
+
+-- Persistent store for group layout computed positions
+_G["DoiteGroup_Computed"]       = _G["DoiteGroup_Computed"]       or {}
+_G["DoiteGroup_LastLayoutTime"] = _G["DoiteGroup_LastLayoutTime"] or 0
+
+-- ========= Spell Texture Cache (abilities) =========
+-- Populates DoiteAurasDB.cache[name] = texture from the player's spellbook.
+-- Works on Turtle/1.12 via GetSpellName / GetSpellTexture.
+
+local function DoiteAuras_RebuildSpellTextureCache()
+    if not DoiteAurasDB or not DoiteAurasDB.cache then return end
+    local cache = DoiteAurasDB.cache
+    -- Scan all tabs/slots once and remember textures by NAME (rank-agnostic, matches your displayName use)
+    for tab = 1, (GetNumSpellTabs() or 0) do
+        local _, _, offset, numSlots = GetSpellTabInfo(tab)
+        if numSlots and numSlots > 0 then
+            for i = 1, numSlots do
+                local idx = offset + i
+                local name, rank = GetSpellName(idx, BOOKTYPE_SPELL)
+                if not name then break end
+                local tex = GetSpellTexture and GetSpellTexture(idx, BOOKTYPE_SPELL)
+                if name and tex and cache[name] ~= tex then
+                    cache[name] = tex
+                end
+            end
+        end
+    end
+
+    -- If we already have configured Ability entries, seed their .iconTexture for immediate use
+    if DoiteAurasDB.spells then
+        for key, data in pairs(DoiteAurasDB.spells) do
+            if data and data.type == "Ability" then
+                local nm = data.displayName or data.name
+                local t  = nm and cache[nm]
+                if t then data.iconTexture = t end
+            end
+        end
+    end
+end
+
+-- Event hook: rebuild on login/world and whenever the spellbook changes (talent/build swaps on Turtle fire this)
+local _daSpellTex = CreateFrame("Frame")
+_daSpellTex:RegisterEvent("PLAYER_ENTERING_WORLD")
+_daSpellTex:RegisterEvent("SPELLS_CHANGED")
+_daSpellTex:SetScript("OnEvent", function()
+    DoiteAuras_RebuildSpellTextureCache()
+    -- repaint so brand-new abilities get icons instantly
+    if DoiteAuras_RefreshIcons then pcall(DoiteAuras_RefreshIcons) end
+end)
+-- ==================================================
 
 -- Title-case function with exceptions for small words (keeps first word capitalized)
 local function TitleCase(str)
@@ -39,6 +90,51 @@ local function TitleCase(str)
     result = string.gsub(result, "%s+$", "")
     return result
 end
+
+-- === Duplicate handling helpers ===
+local function BaseKeyFor(data_or_name, typ)
+  if type(data_or_name) == "table" then
+    local d = data_or_name
+    local nm = (d.displayName or d.name or "")
+    local tp = (d.type or "Ability")
+    return nm .. "_" .. tp
+  else
+    local nm = tostring(data_or_name or "")
+    local tp = tostring(typ or "Ability")
+    return nm .. "_" .. tp
+  end
+end
+
+-- Generate a unique storage key for DB & frames.
+-- Keeps the very first as <name>_<type>; subsequent siblings append #2, #3, ...
+local function GenerateUniqueKey(name, typ)
+  local base = BaseKeyFor(name, typ)
+  if not DoiteAurasDB.spells[base] then
+    return base, base, 1
+  end
+  local n = 2
+  while DoiteAurasDB.spells[base .. "#" .. tostring(n)] do
+    n = n + 1
+  end
+  return (base .. "#" .. tostring(n)), base, n
+end
+
+-- Find siblings (same displayName & type)
+local function IterSiblings(name, typ)
+  local base = BaseKeyFor(name, typ)
+  local function iter(_, last)
+    for k, d in pairs(DoiteAurasDB.spells) do
+      if k ~= last then
+        local bk = BaseKeyFor(d)
+        if bk == base then
+          return k, d
+        end
+      end
+    end
+  end
+  return iter, nil, nil
+end
+
 
 -- Tooltip for buff/debuff scanning
 local daTip = CreateFrame("GameTooltip", "DoiteAurasTooltip", nil, "GameTooltipTemplate")
@@ -76,13 +172,20 @@ frame:SetBackdropBorderColor(1, 1, 1, 1)
 frame:SetFrameStrata("FULLSCREEN_DIALOG")
 
 local title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-title:SetPoint("TOP", frame, "TOP", 0, -15)
+title:SetPoint("TOPLEFT", frame, "TOPLEFT", 20, -15)
 title:SetText("DoiteAuras")
 
+local sep = frame:CreateTexture(nil, "ARTWORK")
+sep:SetHeight(1)
+sep:SetPoint("TOPLEFT", frame, "TOPLEFT", 20, -35)
+sep:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -20, -35)
+sep:SetTexture(1,1,1)
+if sep.SetVertexColor then sep:SetVertexColor(1,1,1,0.25) end
+
 -- Intro text
-local intro = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+local intro = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 intro:SetPoint("TOPLEFT", frame, "TOPLEFT", 20, -40)
-intro:SetText("Enter the exact name of the ability, buff or debuff.")
+intro:SetText("Enter the EXACT name or ID of the ability, buff or debuff.")
 
 -- Close button
 local closeBtn = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
@@ -210,6 +313,16 @@ local function GetOrderedSpells()
     table.sort(list, function(a,b) return a.order < b.order end)
     return list
 end
+
+-- Throttle RefreshIcons() to avoid recursive layout overrides
+local _lastRefresh = 0
+local function _CanRunRefresh()
+    local now = GetTime and GetTime() or 0
+    if now - _lastRefresh < 0.1 then return false end
+    _lastRefresh = now
+    return true
+end
+
 local function RebuildOrder()
     local ordered = GetOrderedSpells()
     for i=1, table.getn(ordered) do DoiteAurasDB.spells[ordered[i].key].order = i end
@@ -239,6 +352,7 @@ local function FindPlayerBuff(name)
     end
     return false,nil
 end
+
 local function FindPlayerDebuff(name)
     local i=1
     while true do
@@ -254,141 +368,332 @@ local function FindPlayerDebuff(name)
 end
 
 -- Create/update icon (fixed: use offsetX/offsetY/iconSize saved fields and create global DoiteIcon_<key> frames)
+-- Create or update icon *structure only* (no positioning or texture changes here)
 local function CreateOrUpdateIcon(key, layer)
-  -- One-time creation guard: build UI objects once, then only update properties
-  local name = "DoiteIcon_" .. key
-  local f = _G[name]
-  if not f then
-    f = CreateFrame("Frame", name, UIParent)
-    f:SetWidth(size or 36)
-    f:SetHeight(size or 36)
-    f:SetPoint("CENTER", UIParent, "CENTER")  -- hidden by default; Conditions controls visibility
-
-    -- Create children exactly once
-    local icon = f:CreateTexture(nil, "ARTWORK")
-    icon:SetAllPoints(f)
-    f.icon = icon
-
-    -- Optional count text (created once)
-    local fs = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    fs:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -2, 2)
-    fs:SetText("")
-    f.count = fs
-  end
-
-  -- From here on, ONLY update properties (no Show/Hide here)
-  -- Texture update: set only if available/changed
-  if tex and f.icon then f.icon:SetTexture(tex) end
-    local data = GetSpellData(key)
-    local name, typ = data.displayName or data.name or "", data.type or "Ability"
-    local show, tex = false, nil
-
-    -- Base visibility logic (unchanged)
-    if typ=="Ability" then
-        local slot = FindSpellBookSlot(name)
-        if slot then
-            local start, dur, en = GetSpellCooldown(slot, BOOKTYPE_SPELL)
-            if en==1 and (dur==0 or dur==nil) then
-                tex = GetSpellTexture(slot, BOOKTYPE_SPELL)
-                show = true
-            end
-        end
-    elseif typ=="Buff" then
-        local found, btex = FindPlayerBuff(name)
-        if found then show = true; tex = btex end
-    elseif typ=="Debuff" then
-        local found, dtex = FindPlayerDebuff(name)
-        if found then show = true; tex = dtex end
-    end
-
-    -- Create or reuse a *named* global frame so DoiteConditions can find it
     local globalName = "DoiteIcon_" .. key
     local f = _G[globalName]
     if not f then
         f = CreateFrame("Frame", globalName, UIParent)
         f:SetFrameStrata("MEDIUM")
+        -- default size; actual sizing applied in RefreshIcons
+        f:SetWidth(36)
+        f:SetHeight(36)
+
         f:EnableMouse(true)
         f:SetMovable(true)
         f:RegisterForDrag("LeftButton")
-        -- icon texture
+
+        -- icon texture (created once)
         f.icon = f:CreateTexture(nil, "BACKGROUND")
         f.icon:SetAllPoints(f)
 
-        -- drag handlers save into the DB fields used by DoiteEdit (offsetX/offsetY)
-        f:SetScript("OnDragStart", function(self) self:StartMoving() end)
+        -- optional count text (created once)
+        local fs = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        fs:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -2, 2)
+        fs:SetText("")
+        f.count = fs
+
+        -- drag handlers: followers ignore write; leaders update DB
+        f:SetScript("OnDragStart", function(self)
+            -- Followers should not start moving
+            local data = GetSpellData(key)
+            if data and data.group and data.group ~= "" and data.group ~= "no" and not data.isLeader then
+                return
+            end
+            self:StartMoving()
+        end)
+
         f:SetScript("OnDragStop", function(self)
             self:StopMovingOrSizing()
             local point, relTo, relPoint, x, y = self:GetPoint()
-            -- Save to DoiteAurasDB.spells fields that DoiteEdit expects
-            data.offsetX = x or 0
-            data.offsetY = y or 0
-            -- update immediately (if DoiteAuras refresh function exists)
-            if DoiteAuras_RefreshIcons then pcall(DoiteAuras_RefreshIcons) end
+            local data = GetSpellData(key)
+            -- Followers must never write offsets or trigger refresh
+            if data and data.group and data.group ~= "" and data.group ~= "no" and not data.isLeader then
+                -- snap back to leader visually will happen on next refresh; do nothing
+                return
+            end
+
+            -- leaders and ungrouped icons update saved offsets normally
+            if data then
+                data.offsetX = x or 0
+                data.offsetY = y or 0
+            end
+			
+			-- invalidate persisted layout for this icon's group (forces fresh layout)
+			if data and data.group and data.group ~= "" and data.group ~= "no" and data.isLeader then
+				if _G["DoiteGroup_Computed"] then
+					_G["DoiteGroup_Computed"][data.group] = nil
+				end
+			end
+
+            -- schedule a single refresh (debounced via RefreshIcons() guard)
+            if DoiteAuras_RefreshIcons then
+                -- small delay to avoid re-entrancy racing (use DA_RunLater if available)
+                if DA_RunLater then
+                    DA_RunLater(0.05, function() if DoiteAuras_RefreshIcons then pcall(DoiteAuras_RefreshIcons) end end)
+                else
+                    local fDelay = CreateFrame("Frame")
+                    local acc = 0
+                    fDelay:SetScript("OnUpdate", function()
+                        acc = acc + arg1
+                        if acc >= 0.05 then
+                            fDelay:SetScript("OnUpdate", nil)
+                            if DoiteAuras_RefreshIcons then pcall(DoiteAuras_RefreshIcons) end
+                        end
+                    end)
+                end
+            end
         end)
     end
 
-    -- cache locally as before so list code can still hide/show if it wants
+    -- cache locally as before
     icons[key] = f
-
     if layer then f:SetFrameLevel(layer) end
 
-    -- Apply layout data (prefer spell's own saved offset/iconSize, but remain compatible with DoiteDB.icons if present)
-    local layout = GetIconLayout(key) -- still okay to prefer DoiteDB.icons if present (backwards compatibility)
-
-    -- primary source: DoiteAurasDB.spells data fields (offsetX/offsetY/iconSize)
-    local posX = data.offsetX or data.x or 0
-    local posY = data.offsetY or data.y or 0
-    local size = data.iconSize or data.size or 36
-
-    -- if DoiteDB layout exists, allow it to override (preserve compatibility)
-    if layout then
-        posX = layout.posX or layout.offsetX or posX
-        posY = layout.posY or layout.offsetY or posY
-        size = layout.size or layout.iconSize or size
-    end
-
-    -- Apply transform/size/point
-    f:SetScale(data.scale or 1)
-    f:SetAlpha(data.alpha or 1)
-    f:ClearAllPoints()
-    f:SetWidth(size)
-    f:SetHeight(size)
-    f:SetPoint("CENTER", UIParent, "CENTER", posX, posY)
-
-    -- Optional condition function from DB (unchanged)
-    if data.conditionFunc and type(data.conditionFunc) == "function" then
-        show = data.conditionFunc(show, name, typ, data)
-    end
-
-    -- Update texture and visibility
-    if show then
-        f.icon:SetTexture(tex or "Interface\\Icons\\INV_Misc_QuestionMark")
-    else
-    end
+    return f
 end
 
-
--- Refresh icons
+-- Refresh icons (group-aware)
 local function RefreshIcons()
-    local ordered=GetOrderedSpells(); local total=table.getn(ordered)
-    for i=1,total do CreateOrUpdateIcon(ordered[i].key,10+(total-i+1)) end
+    if not _CanRunRefresh() then return end
+    local ordered = GetOrderedSpells()
+    local total = table.getn(ordered)
+    local candidates = {}
+
+    -- Step 1: collect all icon states
+    for i = 1, total do
+        local key = ordered[i].key
+        local data = ordered[i].data
+        local typ = data and data.type or "Ability"
+        local tex, shouldShow = nil, false
+
+        if typ == "Ability" then
+            local slot = FindSpellBookSlot(data.displayName or data.name)
+            if slot then
+                local start, dur, en = GetSpellCooldown(slot, BOOKTYPE_SPELL)
+                if en == 1 and (dur == 0 or dur == nil) then
+                    tex = GetSpellTexture(slot, BOOKTYPE_SPELL)
+                    shouldShow = true
+                end
+            end
+        elseif typ == "Buff" then
+            local found, btex = FindPlayerBuff(data.displayName or data.name)
+            if found then shouldShow, tex = true, btex end
+        elseif typ == "Debuff" then
+            local found, dtex = FindPlayerDebuff(data.displayName or data.name)
+            if found then shouldShow, tex = true, dtex end
+        end
+
+        table.insert(candidates, {
+            key = key,
+            data = data,
+            show = shouldShow,
+            tex  = tex,
+            size = data.iconSize or data.size or 36,
+        })
+    end
+
+    -- Step 2: ensure icons exist first, then apply group layout once
+    for _, entry in ipairs(candidates) do
+        if not _G["DoiteIcon_" .. entry.key] then
+            CreateOrUpdateIcon(entry.key, 36)
+        end
+    end
+    if DoiteGroup and not _G["DoiteGroup_LayoutInProgress"] and DoiteGroup.ApplyGroupLayout then
+		pcall(DoiteGroup.ApplyGroupLayout, candidates)
+	end
+	
+	-- Persist the computed layout so future refresh passes keep using it
+	do
+		local map = _G["DoiteGroup_Computed"]
+		local now = (GetTime and GetTime()) or 0
+		for _, e in ipairs(candidates) do
+			local d = e.data
+			if d and d.group and d.group ~= "" and d.group ~= "no" and e._computedPos then
+				map[d.group] = map[d.group] or {}
+				-- store/replace entry for this key
+				local list = map[d.group]
+				local found = false
+				for i=1, table.getn(list) do
+					if list[i].key == e.key then
+						list[i] = { key = e.key, _computedPos = {
+							x = e._computedPos.x, y = e._computedPos.y, size = e._computedPos.size
+						} }
+						found = true
+						break
+					end
+				end
+				if not found then
+					table.insert(list, { key = e.key, _computedPos = {
+						x = e._computedPos.x, y = e._computedPos.y, size = e._computedPos.size
+					}})
+				end
+			end
+		end
+		_G["DoiteGroup_LastLayoutTime"] = now
+	end
+
+    -- Step 3: create/update frames and apply positions (single place)
+    if _G["DoiteAuras_RefreshInProgress"] then return end
+    _G["DoiteAuras_RefreshInProgress"] = true
+
+    for _, entry in ipairs(candidates) do
+        local key, data = entry.key, entry.data
+        local globalName = "DoiteIcon_" .. key
+        local f = _G[globalName]
+
+        if not f then
+            f = CreateOrUpdateIcon(key, 36)
+        end
+
+        -- ensure drag scripts are correct (followers cannot start dragging)
+        f:SetScript("OnDragStart", function(self)
+            if data and data.group and data.group ~= "" and data.group ~= "no" and not data.isLeader then return end
+            self:StartMoving()
+        end)
+
+        -- compute final pos/size (group-aware, sticky)
+		local posX, posY, size
+		local isGrouped = (data and data.group and data.group ~= "" and data.group ~= "no")
+		local isLeader  = (data and data.isLeader == true)
+
+		-- 1) Prefer the freshly computed position (if present on this entry)
+		if entry._computedPos then
+			posX = entry._computedPos.x
+			posY = entry._computedPos.y
+			size = entry._computedPos.size
+
+		-- 2) Otherwise prefer the persisted computed layout from the last layout tick
+		elseif isGrouped and _G["DoiteGroup_Computed"] and _G["DoiteGroup_Computed"][data.group] then
+			local list = _G["DoiteGroup_Computed"][data.group]
+			for i=1, table.getn(list) do
+				local ge = list[i]
+				if ge.key == key and ge._computedPos then
+					posX = ge._computedPos.x
+					posY = ge._computedPos.y
+					size = ge._computedPos.size
+					break
+				end
+			end
+		end
+
+		-- 3) If grouped follower and we still don't have a computed pos:
+		--    don't snap back to saved offsets; leave point untouched (sticky) until next layout.
+		if not posX then
+			if isGrouped and not isLeader then
+				-- keep current point; just use saved alpha/scale/size for visual consistency
+				local currentSize = (data and (data.iconSize or data.size)) or 36
+				size = size or currentSize
+				-- DO NOT SetPoint here for follower without computed pos (avoid snap-back)
+			else
+				-- ungrouped or leader: use saved offsets
+				posX = (data and (data.offsetX or data.x)) or 0
+				posY = (data and (data.offsetY or data.y)) or 0
+				size = size or (data and (data.iconSize or data.size)) or 36
+			end
+		end
+
+        f:SetScale((data and data.scale) or 1)
+        f:SetAlpha((data and data.alpha) or 1)
+        f:SetWidth(size); f:SetHeight(size)
+
+        -- Do not re-anchor while a slide preview owns the frame for this tick
+        if not f._daSliding then
+            if posX ~= nil and posY ~= nil then
+                f:ClearAllPoints()
+                f:SetPoint("CENTER", UIParent, "CENTER", posX, posY)
+            else
+                -- Grouped follower with no computed position this tick:
+                -- DO NOT ClearAllPoints or SetPoint; keep last good layout anchor.
+            end
+        end
+
+        -- Texture handling (with saved iconTexture fallback)
+        local displayName = (data and (data.displayName or data.name)) or key
+        local texToUse = entry.tex
+		  or DoiteAurasDB.cache[displayName]
+		  or (data and data.iconTexture)
+
+		if not texToUse and data and data.type == "Ability" then
+		  local slot = FindSpellBookSlot(displayName)
+		  if slot then texToUse = GetSpellTexture(slot, BOOKTYPE_SPELL) end
+		end
+
+		if texToUse then
+		  -- Keep a name-level cache and also stamp it on this entry so it persists
+		  DoiteAurasDB.cache[displayName] = texToUse
+		  if data and not data.iconTexture then
+			data.iconTexture = texToUse
+		  end
+		end
+
+		f.icon:SetTexture(texToUse or "Interface\\Icons\\INV_Misc_QuestionMark")
+
+		-- Visibility: conditions OR slide … but the group limit has final say
+		local wantsFromConditions = (f._daShouldShow == true)
+		local wantsFromSlide      = (f._daSliding == true)
+		local blockedByGroup      = (f._daBlockedByGroup == true)
+
+		local shouldBeVisible = (wantsFromConditions or wantsFromSlide) and (not blockedByGroup)
+		if shouldBeVisible then
+			f:Show()
+		else
+			f:Hide()
+		end
+    end
+    _G["DoiteAuras_RefreshInProgress"] = false
 end
 
 -- Refresh list
 local function RefreshList()
-    for _,v in pairs(spellButtons) do if v.Hide then v:Hide() end end; spellButtons={}
-    local ordered=GetOrderedSpells(); local total=table.getn(ordered)
-    listContent:SetHeight(math.max(160,total*55))
-    for i,entry in ipairs(ordered) do
-        local key,data=entry.key,entry.data; local display=data.displayName or key
-        local btn=CreateFrame("Frame",nil,listContent); btn:SetWidth(260); btn:SetHeight(50)
-        btn.fontString=btn:CreateFontString(nil,"OVERLAY","GameFontNormal")
-        btn.fontString:SetPoint("TOPLEFT",btn,"TOPLEFT",5,-5); btn.fontString:SetText(display)
-        btn.tag=btn:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
-        btn.tag:SetPoint("TOPLEFT",btn.fontString,"BOTTOMLEFT",0,-2)
-        if data.type=="Ability" then btn.tag:SetText("|cff4da6ffAbility|r")
-        elseif data.type=="Buff" then btn.tag:SetText("|cff22ff22Buff|r")
-        elseif data.type=="Debuff" then btn.tag:SetText("|cffff4d4dDebuff|r") end
+	  for _, v in pairs(spellButtons) do if v.Hide then v:Hide() end end
+	  spellButtons = {}
+	  local ordered = GetOrderedSpells()
+	  local total   = table.getn(ordered)
+	  listContent:SetHeight(math.max(160, total * 55))
+
+	  -- NEW: build grouping info: baseKey -> {count, idxByKey}
+	  local groupCount = {}
+	  local groupIndex = {}
+	  for i, entry in ipairs(ordered) do
+		local d = entry.data
+		local base = BaseKeyFor(d)
+		groupCount[base] = (groupCount[base] or 0) + 1
+	  end
+	  for i, entry in ipairs(ordered) do
+		local d = entry.data
+		local base = BaseKeyFor(d)
+		groupIndex[base] = (groupIndex[base] or 0) + 1
+		entry._groupIdx = groupIndex[base]
+		entry._groupCnt = groupCount[base]
+	  end
+
+	  for i, entry in ipairs(ordered) do
+		local key, data = entry.key, entry.data
+		local base = BaseKeyFor(data)
+
+		local display = data.displayName or key
+		-- NEW: show "(i/N)" only if N > 1
+		if entry._groupCnt and entry._groupCnt > 1 then
+		  display = string.format("%s (%d/%d)", display, entry._groupIdx, entry._groupCnt)
+		end
+
+		local btn = CreateFrame("Frame", nil, listContent)
+		btn:SetWidth(260); btn:SetHeight(50)
+
+		btn.fontString = btn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+		btn.fontString:SetPoint("TOPLEFT", btn, "TOPLEFT", 5, -5)
+		btn.fontString:SetText(display)
+
+		btn.tag = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+		btn.tag:SetPoint("TOPLEFT", btn.fontString, "BOTTOMLEFT", 0, -2)
+		if data.type == "Ability" then
+		  btn.tag:SetText("|cff4da6ffAbility|r")
+		elseif data.type == "Buff" then
+		  btn.tag:SetText("|cff22ff22Buff|r")
+		elseif data.type == "Debuff" then
+		  btn.tag:SetText("|cffff4d4dDebuff|r")
+		end
         -- Remove
         btn.removeBtn=CreateFrame("Button",nil,btn,"UIPanelButtonTemplate")
         btn.removeBtn:SetWidth(60); btn.removeBtn:SetHeight(18)
@@ -448,30 +753,75 @@ local function RefreshList()
         btn.sep=btn:CreateTexture(nil,"ARTWORK"); btn.sep:SetHeight(1)
         btn.sep:SetPoint("BOTTOMLEFT",btn,"BOTTOMLEFT",0,-2)
         btn.sep:SetPoint("BOTTOMRIGHT",btn,"BOTTOMRIGHT",0,-2); btn.sep:SetTexture(0.9,0.9,0.9,0.12)
-        btn:SetPoint("TOPLEFT",listContent,"TOPLEFT",0,-10-(i-1)*55)
-        spellButtons[key]=btn; btn:Show()
-    end
-    scrollFrame:SetScrollChild(listContent)
+        btn:SetPoint("TOPLEFT", listContent, "TOPLEFT", 0, -10 - (i - 1) * 55)
+    spellButtons[key] = btn
+    btn:Show()
+  end
+
+  scrollFrame:SetScrollChild(listContent)
 end
 
 -- Add button
-addBtn:SetScript("OnClick",function()
-    local name=input:GetText(); if not name or name=="" then return end
-    name=TitleCase(name); local t=currentType; local key=name.."_"..t
-    if t=="Ability" and not FindSpellBookSlot(name) then
-        DEFAULT_CHAT_FRAME:AddMessage("|cffff0000DoiteAuras:|r Spell not found in spellbook."); return
+addBtn:SetScript("OnClick", function()
+  local name = input:GetText(); if not name or name == "" then return end
+  name = TitleCase(name)
+  local t = currentType
+
+  -- Ability validation stays
+  if t == "Ability" and not FindSpellBookSlot(name) then
+    (DEFAULT_CHAT_FRAME or ChatFrame1):AddMessage("|cffff0000DoiteAuras:|r Spell not found in spellbook.")
+    return
+  end
+
+  -- NEW: generate unique key; baseKey groups duplicates by name+type
+  local key, baseKey, instanceIdx = GenerateUniqueKey(name, t)
+
+  -- Order = append at end
+  local nextOrder = table.getn(GetOrderedSpells()) + 1
+
+  -- Create the DB entry (defaults filled later by EnsureDBEntry/DoiteEdit)
+  DoiteAurasDB.spells[key] = {
+    order = nextOrder,
+    type  = t,
+    displayName = name,
+    baseKey = baseKey,  -- helpful but not required (we still compute BaseKeyFor on the fly)
+    uid = instanceIdx,  -- 1 for the first, 2,3,... for next siblings
+  }
+
+  -- Auto-prime texture when we can:
+  -- 1) Abilities: spellbook texture
+  if t == "Ability" then
+    local slot = FindSpellBookSlot(name)
+    if slot then
+      local tex = GetSpellTexture(slot, BOOKTYPE_SPELL)
+      if tex then
+        DoiteAurasDB.cache[name] = tex
+        DoiteAurasDB.spells[key].iconTexture = tex
+      end
     end
-	if not DoiteAurasDB.spells[key] then
-		local nextOrder=table.getn(GetOrderedSpells())+1
-		DoiteAurasDB.spells[key]={order=nextOrder,type=t,displayName=name}
-		-- if DoiteEdit (EnsureDBEntry) is loaded, make sure defaults are applied immediately
-		if EnsureDBEntry then
-			pcall(EnsureDBEntry, key)
-		end
-	end
-    input:SetText(""); RebuildOrder(); RefreshList(); RefreshIcons()
-    scrollFrame:SetVerticalScroll(math.max(0,listContent:GetHeight()-scrollFrame:GetHeight()))
-	if DoiteConditions_RequestEvaluate then DoiteConditions_RequestEvaluate() end
+  end
+
+  -- 2) If we’ve ever seen this name before (ability or aura), reuse known texture
+  if not DoiteAurasDB.spells[key].iconTexture then
+    local cached = DoiteAurasDB.cache[name]
+    if cached then
+      DoiteAurasDB.spells[key].iconTexture = cached
+    else
+      -- 3) Fallback: copy iconTexture from any sibling that already has one
+      for sk, sd in IterSiblings(name, t) do
+        if sd and sd.iconTexture then
+          DoiteAurasDB.spells[key].iconTexture = sd.iconTexture
+          break
+        end
+      end
+    end
+  end
+
+  if EnsureDBEntry then pcall(EnsureDBEntry, key) end
+  input:SetText("")
+  RebuildOrder(); RefreshList(); RefreshIcons()
+  scrollFrame:SetVerticalScroll(math.max(0, listContent:GetHeight() - scrollFrame:GetHeight()))
+  if DoiteConditions_RequestEvaluate then DoiteConditions_RequestEvaluate() end
 end)
 
 -- =========================
@@ -779,6 +1129,25 @@ RebuildOrder(); RefreshList(); RefreshIcons()
 DoiteAuras_RefreshList  = RefreshList
 DoiteAuras_RefreshIcons = RefreshIcons
 
+function DoiteAuras.GetAllCandidates()
+    local list = {}
+    for key, data in pairs(DoiteAurasDB.spells or {}) do
+                local f = _G["DoiteIcon_" .. key]
+        -- Intent-based visibility: conditions OR active slide
+        local wants = false
+        if f then
+            wants = (f._daShouldShow == true) or (f._daSliding == true)
+        end
+        table.insert(list, {
+            key  = key,
+            data = data,
+            show = wants,
+            tex  = (f and f.icon and f.icon:GetTexture()) or nil,
+            size = data.iconSize or data.size or 36,
+        })
+    end
+    return list
+end
 
 -- Ensure an icon frame exists for a given key (no visibility changes)
 function DoiteAuras_TouchIcon(key)

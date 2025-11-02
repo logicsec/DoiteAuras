@@ -30,6 +30,10 @@ local dirty_target  = false
 local dirty_power   = false
 
 local DG = _G["DoiteGlow"]
+-- While the Doite edit panel is open, this global is set by DoiteEdit.lua
+local function _IsKeyUnderEdit(k)
+    return (k and _G["DoiteEdit_CurrentKey"] and _G["DoiteEdit_CurrentKey"] == k)
+end
 
 -- === Aura snapshot & single tooltip ===
 local DoiteConditionsTooltip = _G["DoiteConditionsTooltip"]
@@ -295,7 +299,7 @@ function SlideMgr:Get(key)
     if not st then return false, 0, 0, 1, false, false end
 
     local now = GetTime()
-    local t = (st.endTime - now) / 3.0  -- remaining / 3s window
+    local t = (st.endTime - now) / (st.total or 3.0)
     if t < 0 then t = 0 elseif t > 1 then t = 1 end
 
     local farX, farY = 0, 0
@@ -970,20 +974,22 @@ function DoiteConditions:ApplyVisuals(key, show, glow, grey)
     local dataTbl = (DoiteDB and DoiteDB.icons and DoiteDB.icons[key])
                     or (DoiteAurasDB and DoiteAurasDB.spells and DoiteAurasDB.spells[key])
 
-    -- load textures only when showing
-    if show then
-        if frame.icon and not frame.icon:GetTexture() and dataTbl and (dataTbl.displayName or dataTbl.name) then
-            local cached = IconCache[dataTbl.displayName or dataTbl.name]
-            if cached then frame.icon:SetTexture(cached) else frame.icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark") end
-        end
-        if dataTbl then
-            if dataTbl.type == "Ability" then
-                _EnsureAbilityTexture(frame, dataTbl)
-            elseif dataTbl.type == "Buff" or dataTbl.type == "Debuff" then
-                _EnsureAuraTexture(frame, dataTbl)
-            end
-        end
-    end
+	-- load textures when showing OR while this key is being edited
+	local editing = _IsKeyUnderEdit(key)
+	if show or editing then
+		if frame.icon and not frame.icon:GetTexture() and dataTbl and (dataTbl.displayName or dataTbl.name) then
+			local cached = IconCache[dataTbl.displayName or dataTbl.name]
+			if cached then frame.icon:SetTexture(cached) else frame.icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark") end
+		end
+		if dataTbl then
+			if dataTbl.type == "Ability" then
+				_EnsureAbilityTexture(frame, dataTbl)
+			elseif dataTbl.type == "Buff" or dataTbl.type == "Debuff" then
+				_EnsureAuraTexture(frame, dataTbl)
+			end
+		end
+	end
+
 
     ------------------------------------------------------------
     -- Slider (driven by SlideMgr; ignores GCD; super smooth)
@@ -1014,26 +1020,81 @@ function DoiteConditions:ApplyVisuals(key, show, glow, grey)
     do
         local active, sdx, sdy, a, sg, sg2 = SlideMgr:Get(key)
         slideActive, dx, dy, slideAlpha, supGlow, supGrey = active, sdx, sdy, a, sg, sg2
+
+        -- Flags for other systems:
+        frame._daSliding      = slideActive and true or false   -- animation happening this frame
+        frame._daShouldShow   = show and true or false          -- logical visibility from conditions (no slide)
+        -- NOTE: frame._daBlockedByGroup is set by DoiteGroup; we only READ it here
     end
 
-    -- Determine baseline anchoring
-    local baseX, baseY = 0, 0
-    if _GetBaseXY and dataTbl then baseX, baseY = _GetBaseXY(key, dataTbl) end
-    if slideActive then SlideMgr:UpdateBase(key, baseX, baseY) end
 
-    -- Show during slide preview even if main conditions would hide
-    local showForSlide = show or slideActive
+	-- Determine baseline anchoring
+	local baseX, baseY = 0, 0
+	if _GetBaseXY and dataTbl then baseX, baseY = _GetBaseXY(key, dataTbl) end
+
+	 -- If this icon belongs to a group, prefer the latest computed position (for leaders AND followers)
+    local isGrouped = (dataTbl and dataTbl.group and dataTbl.group ~= "" and dataTbl.group ~= "no")
+    if isGrouped and _G["DoiteGroup_Computed"] and _G["DoiteGroup_Computed"][dataTbl.group] then
+        for _, e in ipairs(_G["DoiteGroup_Computed"][dataTbl.group]) do
+            if e.key == key and e._computedPos then
+                baseX = e._computedPos.x or baseX
+                baseY = e._computedPos.y or baseY
+                break
+            end
+        end
+    end
+
+
+	if slideActive then SlideMgr:UpdateBase(key, baseX, baseY) end
+
+	-- Show during slide preview even if main conditions would hide
+	local showForSlide = (show or slideActive)
+
+	-- If this is the key currently being edited, force it visible regardless of conditions/group caps
+	if editing then
+		showForSlide = true
+	end
+
+	-- Group capacity may block this icon unless we are editing this very key
+	if frame._daBlockedByGroup and (not editing) then
+		showForSlide = false
+	end
 
     -- Apply position and alpha (no stutter: we set exact coordinates each paint)
     do
-        frame:ClearAllPoints()
-        if slideActive then
-            frame:SetPoint("CENTER", UIParent, "CENTER", baseX + dx, baseY + dy)
-            frame:SetAlpha(slideAlpha)
-        else
-            frame:SetPoint("CENTER", UIParent, "CENTER", baseX, baseY)
-            frame:SetAlpha((dataTbl and dataTbl.alpha) or 1)
-        end
+        local isGrouped = (dataTbl and dataTbl.group and dataTbl.group ~= "" and dataTbl.group ~= "no")
+        local isLeader = (dataTbl and dataTbl.isLeader == true)
+
+		-- Apply position and alpha (no stutter: we set exact coordinates each paint)
+		do
+			local isGrouped = (dataTbl and dataTbl.group and dataTbl.group ~= "" and dataTbl.group ~= "no")
+			local isLeader  = (dataTbl and dataTbl.isLeader == true)
+
+			-- When sliding: apply transient movement to everyone (leaders + followers),
+			-- using the computed/group base for followers (set above).
+			if slideActive then
+				frame:ClearAllPoints()
+				frame:SetPoint("CENTER", UIParent, "CENTER", baseX + dx, baseY + dy)
+				frame:SetAlpha(slideAlpha)
+			else
+				-- When not sliding: do NOT force followers' points here.
+				-- Leaders and ungrouped icons still position themselves so they show up when not in a group.
+				if not (isGrouped and not isLeader) then
+					frame:ClearAllPoints()
+					frame:SetPoint("CENTER", UIParent, "CENTER", baseX, baseY)
+					frame:SetAlpha((dataTbl and dataTbl.alpha) or 1)
+				else
+					-- Followers:
+					-- If a computed group base was resolved above, we can safely anchor here.
+					-- (baseX/baseY were replaced by the computed pos when available)
+					if baseX ~= nil and baseY ~= nil then
+						frame:ClearAllPoints()
+						frame:SetPoint("CENTER", UIParent, "CENTER", baseX, baseY)
+					end
+					frame:SetAlpha((dataTbl and dataTbl.alpha) or 1)
+				end
+			end
+		end
     end
 
     if showForSlide then frame:Show() else frame:Hide() end
@@ -1047,7 +1108,25 @@ function DoiteConditions:ApplyVisuals(key, show, glow, grey)
     if DG then
         if showForSlide and glow and (not supGlow) then DG.Start(frame) else DG.Stop(frame) end
     end
+
+    ----------------------------------------------------------------
+    -- Reflow groups when this icon’s logical visibility flips.
+    -- This covers Buff/Debuff-only groups (no abilities involved).
+    ----------------------------------------------------------------
+    if DoiteGroup and DoiteGroup.ApplyGroupLayout then
+        if frame._lastShowState ~= show then
+            frame._lastShowState = show
+            if type(DoiteAuras) == "table" and type(DoiteAuras.GetAllCandidates) == "function" then
+                local all = DoiteAuras.GetAllCandidates()
+                if all and type(all) == "table" then
+                    -- fire immediately; layout is cheap and avoids stacking
+                    pcall(DoiteGroup.ApplyGroupLayout, all)
+                end
+            end
+        end
+    end
 end
+
 
 function DoiteConditions_RequestEvaluate()
     dirty_ability, dirty_aura, dirty_target, dirty_power = true, true, true, true
@@ -1087,8 +1166,8 @@ _tick:SetScript("OnUpdate", function()
     _acc = _acc + dt
     _scanAccum = _scanAccum + dt
 
-    -- Refresh player & target auras every 0.2s
-    if _scanAccum >= 0.2 then
+    -- Refresh player & target auras every 0.1s
+    if _scanAccum >= 0.1 then
         _scanAccum = 0
 
         -- player
@@ -1103,9 +1182,10 @@ _tick:SetScript("OnUpdate", function()
     end
 
 	-- Render faster while sliding (feels smooth), default to ~30fps otherwise
-	local thresh = (next(SlideMgr.active) ~= nil) and 0.016 or 0.033
+	local thresh = (next(SlideMgr.active) ~= nil) and 0.016 or 0.020
 	if _acc < thresh then return end
 	_acc = 0
+	dirty_ability = true
 
     local needAbility = dirty_ability or dirty_power
     local needAura    = dirty_aura or dirty_target

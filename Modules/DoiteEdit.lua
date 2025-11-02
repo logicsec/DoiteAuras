@@ -9,6 +9,37 @@ end
 
 local condFrame = nil
 local currentKey = nil
+local SafeRefresh
+local SafeEvaluate
+
+-- === Lightweight throttle for heavy UI work (prevents lag while dragging sliders) ===
+local _DoiteEdit_PendingHeavy = false
+local _DoiteEdit_Accum = 0
+local _DoiteEdit_Throttle = CreateFrame("Frame")
+
+-- Global flag toggled while the main Edit or Main frames are being dragged
+_G["DoiteUI_Dragging"] = _G["DoiteUI_Dragging"] or false
+
+local function DoiteEdit_QueueHeavy()
+    _DoiteEdit_PendingHeavy = true
+end
+
+local function DoiteEdit_FlushHeavy()
+    _DoiteEdit_PendingHeavy = false
+    _DoiteEdit_Accum = 0
+    -- one combined heavy pass
+    SafeRefresh()
+    SafeEvaluate()
+end
+
+_DoiteEdit_Throttle:SetScript("OnUpdate", function()
+    if not _DoiteEdit_PendingHeavy then return end
+    if _G["DoiteUI_Dragging"] then return end  -- defer while the user is dragging frames
+    _DoiteEdit_Accum = _DoiteEdit_Accum + (arg1 or 0)
+    if _DoiteEdit_Accum >= 0.05 then           -- ~20 fps cap for heavy work while sliding
+        DoiteEdit_FlushHeavy()
+    end
+end)
 
 -- Ensure DB entry exists for a key
 local function EnsureDBEntry(key)
@@ -96,7 +127,7 @@ local function BuildGroupLeaders()
     return leaders
 end
 
-local function SafeEvaluate()
+SafeEvaluate = function()
   if DoiteConditions_RequestEvaluate then
     DoiteConditions_RequestEvaluate()
   elseif DoiteConditions and DoiteConditions.EvaluateAll then
@@ -104,11 +135,90 @@ local function SafeEvaluate()
   end
 end
 
--- refresh hooks for main addon
-local function SafeRefresh()
-    if DoiteAuras_RefreshList then DoiteAuras_RefreshList() end
-    if DoiteAuras_RefreshIcons then DoiteAuras_RefreshIcons() end
+SafeRefresh = function()
+  if DoiteAuras_RefreshList then DoiteAuras_RefreshList() end
+  if DoiteAuras_RefreshIcons then DoiteAuras_RefreshIcons() end
 end
+
+-- === Dynamic bounds for Position & Size sliders (based on UIParent) ===
+local function _DA_GetParentDims()
+    local w = (UIParent and UIParent.GetWidth and UIParent:GetWidth()) or (GetScreenWidth and GetScreenWidth()) or 1024
+    local h = (UIParent and UIParent.GetHeight and UIParent:GetHeight()) or (GetScreenHeight and GetScreenHeight()) or 768
+    return w, h
+end
+
+-- compute ranges:
+--  X/Y are offsets from CENTER, so bounds are roughly +/- half the parent size (with a tiny padding)
+--  Size max scales with the smaller screen dimension so big resolutions can use larger icons.
+local function _DA_ComputePosSizeRanges()
+    local w, h = _DA_GetParentDims()
+    local pad = 4
+    local halfW = math.floor(w * 0.5 + 0.5)
+    local halfH = math.floor(h * 0.5 + 0.5)
+
+    local minX, maxX = -halfW + pad, halfW - pad
+    local minY, maxY = -halfH + pad, halfH - pad
+
+    local minSize = 10
+    -- cap icon at ~20% of the shortest side, but never below 100 so small res behaves like before
+    local maxSize = math.max(100, math.floor(math.min(w, h) * 0.20 + 0.5))
+
+    return minX, maxX, minY, maxY, minSize, maxSize
+end
+
+-- apply to existing sliders and clamp the current DB values if out of range
+local function _DA_ApplySliderRanges()
+    if not condFrame or not condFrame.sliderX or not condFrame.sliderY or not condFrame.sliderSize then return end
+
+    local minX, maxX, minY, maxY, minSize, maxSize = _DA_ComputePosSizeRanges()
+
+    -- X
+    condFrame.sliderX:SetMinMaxValues(minX, maxX)
+    local lowX  = _G[condFrame.sliderX:GetName() .. "Low"]
+    local highX = _G[condFrame.sliderX:GetName() .. "High"]
+    if lowX  then lowX:SetText(tostring(minX)) end
+    if highX then highX:SetText(tostring(maxX)) end
+
+    -- Y
+    condFrame.sliderY:SetMinMaxValues(minY, maxY)
+    local lowY  = _G[condFrame.sliderY:GetName() .. "Low"]
+    local highY = _G[condFrame.sliderY:GetName() .. "High"]
+    if lowY  then lowY:SetText(tostring(minY)) end
+    if highY then highY:SetText(tostring(maxY)) end
+
+    -- Size
+    condFrame.sliderSize:SetMinMaxValues(minSize, maxSize)
+    local lowS  = _G[condFrame.sliderSize:GetName() .. "Low"]
+    local highS = _G[condFrame.sliderSize:GetName() .. "High"]
+    if lowS  then lowS:SetText(tostring(minSize)) end
+    if highS then highS:SetText(tostring(maxSize)) end
+
+    -- Clamp current values (and DB) into the new ranges
+    local function clamp(v, lo, hi) if v < lo then return lo elseif v > hi then return hi else return v end end
+
+    if currentKey then
+        local d = DoiteAurasDB and DoiteAurasDB.spells and DoiteAurasDB.spells[currentKey]
+        if d then
+            d.offsetX = clamp(d.offsetX or 0, minX, maxX)
+            d.offsetY = clamp(d.offsetY or 0, minY, maxY)
+            d.iconSize = clamp(d.iconSize or 40, minSize, maxSize)
+        end
+    end
+
+    -- Push clamped values into sliders/boxes
+    if currentKey then
+        local d = DoiteAurasDB.spells[currentKey]
+        if d then
+            condFrame.sliderX:SetValue(d.offsetX or 0)
+            condFrame.sliderY:SetValue(d.offsetY or 0)
+            condFrame.sliderSize:SetValue(d.iconSize or 40)
+            if condFrame.sliderXBox then condFrame.sliderXBox:SetText(tostring(math.floor((d.offsetX or 0) + 0.5))) end
+            if condFrame.sliderYBox then condFrame.sliderYBox:SetText(tostring(math.floor((d.offsetY or 0) + 0.5))) end
+            if condFrame.sliderSizeBox then condFrame.sliderSizeBox:SetText(tostring(math.floor((d.iconSize or 40) + 0.5))) end
+        end
+    end
+end
+
 
 -- Internal: initialize group dropdown contents for current data
 local function InitGroupDropdown(dd, data)
@@ -1445,7 +1555,9 @@ end
 function UpdateCondFrameForKey(key)
     if not condFrame or not key then return end
     currentKey = key
+	_G["DoiteEdit_CurrentKey"] = key
     local data = EnsureDBEntry(key)
+
 
     -- Header: colored by type
     local typeColor = "|cffffffff"
@@ -1536,6 +1648,7 @@ function UpdateCondFrameForKey(key)
         if condFrame.sliderX then condFrame.sliderX:SetValue(data.offsetX or 0) end
         if condFrame.sliderY then condFrame.sliderY:SetValue(data.offsetY or 0) end
         if condFrame.sliderSize then condFrame.sliderSize:SetValue(data.iconSize or 40) end
+		_DA_ApplySliderRanges()
 
         -- update numeric editboxes if present
         if condFrame.sliderXBox then condFrame.sliderXBox:SetText(tostring(math.floor((data.offsetX or 0) + 0.5))) end
@@ -1559,6 +1672,7 @@ function DoiteConditions_Show(key)
     if condFrame and condFrame:IsShown() and currentKey == key then
         condFrame:Hide()
         currentKey = nil
+        _G["DoiteEdit_CurrentKey"] = nil   -- clear the edit override
         return
     end
 
@@ -1582,6 +1696,32 @@ function DoiteConditions_Show(key)
         condFrame:SetBackdropColor(0,0,0,1)
         condFrame:SetBackdropBorderColor(1,1,1,1)
         condFrame:SetFrameStrata("FULLSCREEN_DIALOG")
+		-- When the conditions editor hides by any means, drop the edit override
+		condFrame:SetScript("OnHide", function()
+			_G["DoiteEdit_CurrentKey"] = nil
+			-- kick a repaint so the formerly-forced icon can hide if conditions say so
+			if DoiteConditions_RequestEvaluate then
+				DoiteConditions_RequestEvaluate()
+			end
+		end)
+
+
+		-- === Suspend heavy work while dragging the main DoiteAuras frame; flush on release ===
+		if DoiteAurasFrame then
+			local _oldDown = DoiteAurasFrame:GetScript("OnMouseDown")
+			DoiteAurasFrame:SetScript("OnMouseDown", function(self)
+				_G["DoiteUI_Dragging"] = true
+				if _oldDown then _oldDown(self) end
+			end)
+
+			local _oldUp = DoiteAurasFrame:GetScript("OnMouseUp")
+			DoiteAurasFrame:SetScript("OnMouseUp", function(self)
+				_G["DoiteUI_Dragging"] = false
+				-- ensure one final repaint after dropping the frame
+				DoiteEdit_FlushHeavy()
+				if _oldUp then _oldUp(self) end
+			end)
+		end
 
         condFrame.header = condFrame:CreateFontString(nil,"OVERLAY","GameFontNormalLarge")
         condFrame.header:SetPoint("TOP", condFrame, "TOP", 0, -15)
@@ -1697,13 +1837,13 @@ function DoiteConditions_Show(key)
         CreateConditionsUI()
 
         condFrame.groupTitle3 = condFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        condFrame.groupTitle3:SetPoint("TOPLEFT", condFrame, "TOPLEFT", 20, -360)
+        condFrame.groupTitle3:SetPoint("TOPLEFT", condFrame, "TOPLEFT", 20, -355)
         condFrame.groupTitle3:SetText("|cff6FA8DCPOSITION & SIZE|r")
 
         condFrame.sep3 = condFrame:CreateTexture(nil, "ARTWORK")
         condFrame.sep3:SetHeight(1)
-        condFrame.sep3:SetPoint("TOPLEFT", condFrame, "TOPLEFT", 16, -375)
-        condFrame.sep3:SetPoint("TOPRIGHT", condFrame, "TOPRIGHT", -16, -275)
+        condFrame.sep3:SetPoint("TOPLEFT", condFrame, "TOPLEFT", 16, -370)
+        condFrame.sep3:SetPoint("TOPRIGHT", condFrame, "TOPRIGHT", -16, -370)
         condFrame.sep3:SetTexture(1,1,1)
         if condFrame.sep3.SetVertexColor then condFrame.sep3:SetVertexColor(1,1,1,0.25) end
 
@@ -1725,8 +1865,8 @@ function DoiteConditions_Show(key)
 
             -- tiny EditBox below slider
             local eb = CreateFrame("EditBox", name .. "_EditBox", condFrame, "InputBoxTemplate")
-            eb:SetWidth(30); eb:SetHeight(18)
-            eb:SetPoint("TOP", s, "BOTTOM", 3, -2)
+            eb:SetWidth(33); eb:SetHeight(18)
+            eb:SetPoint("TOP", s, "BOTTOM", 3, -8)
             eb:SetAutoFocus(false)
             eb:SetText("0")
             eb:SetJustifyH("CENTER")
@@ -1751,6 +1891,17 @@ function DoiteConditions_Show(key)
                 if frame and frame.updateFunc then frame.updateFunc(v) end
             end)
 
+			-- mark “dragging” while the slider is held
+			s:SetScript("OnMouseDown", function()
+				_G["DoiteUI_Dragging"] = true
+			end)
+
+			-- on release: stop pausing and do a single heavy repaint
+			s:SetScript("OnMouseUp", function()
+				_G["DoiteUI_Dragging"] = false
+				DoiteEdit_FlushHeavy()  -- single combined refresh/evaluate
+			end)
+
             -- editbox commit helper (clamp + set slider)
             local function CommitEditBox(box)
                 if not box or not box.slider then return end
@@ -1771,28 +1922,39 @@ function DoiteConditions_Show(key)
                 end
             end
 
-            -- editbox -> slider while typing (userInput true) and on finalize (enter/lost focus)
-            eb:SetScript("OnTextChanged", function(self, userInput)
-                if not userInput then return end
-                if self._updating then return end
-                local txt = self:GetText()
-                local num = tonumber(txt)
-                if num then
-                    if num < minVal then num = minVal end
-                    if num > maxVal then num = maxVal end
-                    self._updating = true
-                    self.slider:SetValue(num)
-                    self._updating = false
-                end
-            end)
+            -- editbox -> slider while typing (WoW 1.12 has no userInput arg)
+			eb:SetScript("OnTextChanged", function()
+				if this._updating then return end
+				local txt = this:GetText()
+				local num = tonumber(txt)
+				if not num then return end
+
+				-- clamp to slider bounds captured in MakeSlider
+				if num < minVal then num = minVal end
+				if num > maxVal then num = maxVal end
+
+				-- drive the slider; its OnValueChanged will push to DB via updateFunc(...)
+				this._updating = true
+				this.slider:SetValue(num)
+				this._updating = false
+			end)
 
             eb:SetScript("OnEnterPressed", function(self)
                 CommitEditBox(self)
                 if self and self.ClearFocus then self:ClearFocus() end
             end)
+			
+			eb:SetScript("OnEscapePressed", function()
+				if this.ClearFocus then this:ClearFocus() end
+				-- also restore the current slider value visually
+				local cur = math.floor((this.slider:GetValue() or 0) + 0.5)
+				this._updating = true
+				this:SetText(tostring(cur))
+				this._updating = false
+			end)
 
-            eb:SetScript("OnEditFocusLost", function(self)
-                CommitEditBox(self)
+            eb:SetScript("OnEditFocusLost", function()
+                CommitEditBox(this)
             end)
 
             return s, eb
@@ -1804,35 +1966,42 @@ function DoiteConditions_Show(key)
         if sliderWidth < 100 then sliderWidth = 100 end
 
         local baseX = 20
-        local baseY = -395
+        local baseY = -390
         local gap = 8
 
-        condFrame.sliderX, condFrame.sliderXBox = MakeSlider("DoiteConditions_SliderX", "Horizontal Position", baseX, baseY, sliderWidth, -500, 500, 1)
-        condFrame.sliderY, condFrame.sliderYBox = MakeSlider("DoiteConditions_SliderY", "Vertical Position", baseX + sliderWidth + gap, baseY, sliderWidth, -500, 500, 1)
-        condFrame.sliderSize, condFrame.sliderSizeBox = MakeSlider("DoiteConditions_SliderSize", "Icon Size", baseX + 2*(sliderWidth + gap), baseY, sliderWidth, 10, 100, 1)
+        do
+			local minX, maxX, minY, maxY, minSize, maxSize = _DA_ComputePosSizeRanges()
+
+			condFrame.sliderX,   condFrame.sliderXBox    = MakeSlider("DoiteConditions_SliderX",   "Horizontal Position", baseX,                        baseY, sliderWidth, minX,   maxX,   1)
+			condFrame.sliderY,   condFrame.sliderYBox    = MakeSlider("DoiteConditions_SliderY",   "Vertical Position",   baseX + sliderWidth + gap,   baseY, sliderWidth, minY,   maxY,   1)
+			condFrame.sliderSize,condFrame.sliderSizeBox = MakeSlider("DoiteConditions_SliderSize","Icon Size",           baseX + 2*(sliderWidth+gap), baseY, sliderWidth, minSize, maxSize, 1)
+		end
+
 
         -- update functions that the slider will call when changed
         condFrame.sliderX.updateFunc = function(value)
-            if not currentKey then return end
-            local d = EnsureDBEntry(currentKey)
-            d.offsetX = value
-            SafeRefresh()
-			SafeEvaluate()
-        end
-        condFrame.sliderY.updateFunc = function(value)
-            if not currentKey then return end
-            local d = EnsureDBEntry(currentKey)
-            d.offsetY = value
-            SafeRefresh()
-			SafeEvaluate()
-        end
-        condFrame.sliderSize.updateFunc = function(value)
-            if not currentKey then return end
-            local d = EnsureDBEntry(currentKey)
-            d.iconSize = value
-            SafeRefresh()
-			SafeEvaluate()
-        end
+			if not currentKey then return end
+			local d = EnsureDBEntry(currentKey)
+			d.offsetX = value
+			DoiteEdit_QueueHeavy()
+		end
+		condFrame.sliderY.updateFunc = function(value)
+			if not currentKey then return end
+			local d = EnsureDBEntry(currentKey)
+			d.offsetY = value
+			DoiteEdit_QueueHeavy()
+		end
+		condFrame.sliderSize.updateFunc = function(value)
+			if not currentKey then return end
+			local d = EnsureDBEntry(currentKey)
+			d.iconSize = value
+			DoiteEdit_QueueHeavy()
+		end
+		
+		-- Keep slider ranges in sync with current resolution/UI scale every time the panel shows
+        condFrame:SetScript("OnShow", function(self)
+            _DA_ApplySliderRanges()
+        end)
 
         -- Initially hidden position section
         if condFrame.groupTitle3 then condFrame.groupTitle3:Hide() end
