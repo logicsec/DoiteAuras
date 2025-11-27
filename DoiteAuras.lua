@@ -1,8 +1,8 @@
--- DoiteAuras: Simplified WeakAura-style addon for Turtle WoW 1.12 (Lua 5.0)
--- Tracks spells by name + type (Ability/Buff/Debuff) so duplicates with different types allowed
--- Shows movable icons (Abilities & Buff/Debuff when present on player), scrollable list, edit/remove/up/down
--- Default logic = show when usable/off CD for Abilities; Buff/Debuff show when present on player
--- SavedVariables: DoiteAurasDB
+---------------------------------------------------------------
+-- DoiteAuras.lua
+-- Simplified WeakAura-style addon for WoW
+-- WoW 1.12 | Lua 5.0
+---------------------------------------------------------------
 
 if DoiteAurasFrame then return end
 
@@ -10,8 +10,8 @@ if DoiteAurasFrame then return end
 DoiteAurasDB = DoiteAurasDB or {}
 DoiteAurasDB.spells         = DoiteAurasDB.spells         or {}
 DoiteAurasDB.cache          = DoiteAurasDB.cache          or {}
-DoiteAurasDB.groupSort      = DoiteAurasDB.groupSort      or {}  -- per-group sort mode: "prio" or "time"
-DoiteAurasDB.bucketDisabled = DoiteAurasDB.bucketDisabled or {}  -- per-bucket Disable (groups/categories/ungrouped)
+DoiteAurasDB.groupSort      = DoiteAurasDB.groupSort      or {}
+DoiteAurasDB.bucketDisabled = DoiteAurasDB.bucketDisabled or {}
 DoiteAuras = DoiteAuras or {}
 
 -- Always return a valid name->texture cache table
@@ -27,12 +27,9 @@ _G["DoiteGroup_Computed"]       = _G["DoiteGroup_Computed"]       or {}
 _G["DoiteGroup_LastLayoutTime"] = _G["DoiteGroup_LastLayoutTime"] or 0
 
 -- ========= Spell Texture Cache (abilities) =========
--- Populates DoiteAurasDB.cache[name] = texture from the player's spellbook.
--- Works on Turtle/1.12 via GetSpellName / GetSpellTexture.
 
 local function DoiteAuras_RebuildSpellTextureCache()
     local cache = DA_Cache()
-    -- Scan all tabs/slots once and remember textures by NAME (rank-agnostic, matches your displayName use)
     for tab = 1, (GetNumSpellTabs() or 0) do
         local _, _, offset, numSlots = GetSpellTabInfo(tab)
         if numSlots and numSlots > 0 then
@@ -48,7 +45,7 @@ local function DoiteAuras_RebuildSpellTextureCache()
         end
     end
 
-    -- If we already have configured Ability entries, seed their .iconTexture for immediate use
+    -- If already have configured Ability entries, seed their .iconTexture for immediate use
     if DoiteAurasDB.spells then
         for key, data in pairs(DoiteAurasDB.spells) do
             if data and data.type == "Ability" then
@@ -60,16 +57,14 @@ local function DoiteAuras_RebuildSpellTextureCache()
     end
 end
 
--- Event hook: rebuild on login/world and whenever the spellbook changes (talent/build swaps on Turtle fire this)
+-- Event hook: rebuild on login/world and whenever the spellbook changes (talent/build swaps)
 local _daSpellTex = CreateFrame("Frame")
 _daSpellTex:RegisterEvent("PLAYER_ENTERING_WORLD")
 _daSpellTex:RegisterEvent("SPELLS_CHANGED")
 _daSpellTex:SetScript("OnEvent", function()
     DoiteAuras_RebuildSpellTextureCache()
-    -- repaint so brand-new abilities get icons instantly
     if DoiteAuras_RefreshIcons then pcall(DoiteAuras_RefreshIcons) end
 end)
--- ==================================================
 
 -- Title-case function with exceptions for small words (keeps first word capitalized)
 local function TitleCase(str)
@@ -125,8 +120,7 @@ local function BaseKeyFor(data_or_name, typ)
   end
 end
 
--- Generate a unique storage key for DB & frames.
--- Keeps the very first as <name>_<type>; subsequent siblings append #2, #3, ...
+-- Generate a unique storage key for DB & frames
 local function GenerateUniqueKey(name, typ)
   local base = BaseKeyFor(name, typ)
   if not DoiteAurasDB.spells[base] then
@@ -252,8 +246,6 @@ addBtn:SetHeight(20)
 addBtn:SetPoint("LEFT", input, "RIGHT", 10, 0)
 addBtn:SetText("Add")
 
--- Dropdowns for Abilities, Items and Bars (share the same slot as the input)
-
 -- Abilities dropdown (spellbook-based, non-passive)
 local abilityDropDown = CreateFrame("Frame", "DoiteAurasAbilityDropDown", frame, "UIDropDownMenuTemplate")
 abilityDropDown:SetPoint("TOPLEFT", input, "TOPLEFT", -23, 3) -- tuned to visually overlap input
@@ -368,7 +360,6 @@ end
 
 local function DA_AddAbilityOption(name)
     if not name or name == "" then return end
-    -- avoid duplicates by plain name (case-sensitive here, but we dedupe by lower for safety later)
     local n = table.getn(DA_AbilityOptions)
     local i
     for i = 1, n do
@@ -379,7 +370,7 @@ local function DA_AddAbilityOption(name)
     DA_AbilityOptions[n + 1] = name
 end
 
--- Helper: close + reopen abilities dropdown on the next frame so we rebuild with new page
+-- Helper: close + reopen abilities dropdown on the next frame
 local function DA_RepageAbilityDropdown()
     if not abilityDropDown then return end
     local dd = abilityDropDown
@@ -387,7 +378,6 @@ local function DA_RepageAbilityDropdown()
     if DA_RunLater then
         DA_RunLater(0.01, function()
             if dd then
-                -- vanilla-safe: toggle closed then open again
                 ToggleDropDownMenu(nil, nil, dd)
                 ToggleDropDownMenu(nil, nil, dd)
             end
@@ -404,7 +394,7 @@ local function DA_AbilityMenu_Initialize()
     local total = table.getn(DA_AbilityOptions)
     local info
 
-    -- Previous page button (if we are not at the first page)
+    -- Previous page button
     if DA_AbilityMenuOffset > 0 then
         info = {}
         info.text = "|cffffff00<< PREVIOUS PAGE <<|r"
@@ -417,7 +407,7 @@ local function DA_AbilityMenu_Initialize()
             -- Reopen dropdown with new page
             DA_RepageAbilityDropdown()
         end
-        info.keepShownOnClick = 1   -- we manage the close/open ourselves
+        info.keepShownOnClick = 1
         info.notCheckable     = 1
         info.isNotRadio       = 1
         info.checked          = nil
@@ -435,17 +425,15 @@ local function DA_AbilityMenu_Initialize()
         info.func = function()
             UIDropDownMenu_SetText(caption, abilityDropDown)
         end
-        -- normal entries: default behaviour (select + close)
         UIDropDownMenu_AddButton(info)
     end
 
-    -- Next page button (if we have more abilities below)
+    -- Next page button
     if endIndex < total then
         info = {}
         info.text = "|cffffff00>> NEXT PAGE >>|r"
         info.func = function()
             local total = table.getn(DA_AbilityOptions)
-            -- Max offset such that we still have something to show
             local maxOffset = 0
             if total > DA_ABILITY_PAGE_SIZE then
                 maxOffset = total - DA_ABILITY_PAGE_SIZE
@@ -471,7 +459,6 @@ local function DA_RebuildAbilityDropDown()
 
     local seen = {}
 
-    -- Mirror DoiteEdit's AuraCond_BuildAbilitySpellList logic:
     -- linear scan over spellbook, filter passives by IsPassiveSpell + rank "Passive"
     local i = 1
     while true do
@@ -516,11 +503,11 @@ local function DA_RebuildAbilityDropDown()
         return la < lb
     end)
 
-    -- Reset paging to the top and hook our custom initializer
+    -- Reset paging to the top and hook custom initializer
     DA_AbilityMenuOffset = 0
     UIDropDownMenu_Initialize(abilityDropDown, DA_AbilityMenu_Initialize)
 
-    -- Reset shown text each time we rebuild
+    -- Reset shown text each time rebuild
     UIDropDownMenu_SetText("Select from dropdown", abilityDropDown)
 end
 
@@ -530,7 +517,6 @@ end
 
 -- Holds the current item names shown in the dropdown
 local DA_ItemOptions = {}
--- Paged dropdown for long lists
 local DA_ItemMenuOffset = 0
 local DA_ITEMMENU_PAGE_SIZE = 20  -- how many real entries per "page"
 
@@ -619,7 +605,6 @@ local function DA_ScanBagUsable()
 end
 
 -- Find the icon texture for a specific item name (case-insensitive)
--- in equipped trinkets/weapons + bags. Returns a texture path or nil.
 local function DA_FindItemTextureByName(itemName)
     if not itemName or itemName == "" then return nil end
 
@@ -674,7 +659,7 @@ local function DA_FindItemTextureByName(itemName)
     return nil
 end
 
--- Helper: close + reopen dropdown on the next frame so we rebuild with new page
+-- Helper: close + reopen dropdown on the next frame
 local function DA_RepageItemDropdown()
     if not itemDropDown then return end
     local dd = itemDropDown
@@ -682,7 +667,6 @@ local function DA_RepageItemDropdown()
     if DA_RunLater then
         DA_RunLater(0.01, function()
             if dd then
-                -- vanilla-safe: toggle closed then open again
                 ToggleDropDownMenu(nil, nil, dd)
                 ToggleDropDownMenu(nil, nil, dd)
             end
@@ -699,7 +683,7 @@ local function DA_ItemMenu_Initialize()
     local total = table.getn(DA_ItemOptions)
     local info
 
-    -- Previous page button (if we are not at the first page)
+    -- Previous page button
     if DA_ItemMenuOffset > 0 then
         info = {}
         info.text = "|cffffff00<< PREVIOUS PAGE <<|r"
@@ -713,7 +697,7 @@ local function DA_ItemMenu_Initialize()
             DA_RepageItemDropdown()
         end
         -- pager rows are not real options: no check, no radio, stay non-selected
-        info.keepShownOnClick = 1   -- we manage the close/open ourselves
+        info.keepShownOnClick = 1
         info.notCheckable     = 1
         info.isNotRadio       = 1
         info.checked          = nil
@@ -735,13 +719,13 @@ local function DA_ItemMenu_Initialize()
         UIDropDownMenu_AddButton(info)
     end
 
-    -- Next page button (if we have more items below)
+    -- Next page button
     if endIndex < total then
         info = {}
         info.text = "|cffffff00>> NEXT PAGE >>|r"
         info.func = function()
             local total = table.getn(DA_ItemOptions)
-            -- Max offset such that we still have something to show
+
             local maxOffset = 0
             if total > DA_ITEMMENU_PAGE_SIZE then
                 maxOffset = total - DA_ITEMMENU_PAGE_SIZE
@@ -807,15 +791,15 @@ local function DA_RebuildItemDropDown()
         DA_AddItemOption(items[i])
     end
 
-    -- 4) Reset paging to the top and hook our custom initializer
+    -- 4) Reset paging to the top and hookcustom initializer
     DA_ItemMenuOffset = 0
     UIDropDownMenu_Initialize(itemDropDown, DA_ItemMenu_Initialize)
 
-    -- Reset shown text each time we rebuild
+    -- Reset shown text each time
     UIDropDownMenu_SetText("Select from dropdown", itemDropDown)
 end
 
--- Helper to read current dropdown text (1.12-style)
+-- Helper to read current dropdown text
 local function DA_GetDropDownText(dd)
     if not dd or not dd.GetName then return nil end
     local n = dd:GetName()
@@ -1042,7 +1026,7 @@ local function GetIconLayout(key)
     return nil
 end
 
--- helper to get data (safe init)
+-- helper to get data
 local function GetSpellData(key)
   if not DoiteAurasDB.spells[key] then
     DoiteAurasDB.spells[key] = {}
@@ -1060,7 +1044,7 @@ local function GetOrderedSpells()
     return list
 end
 
--- NEW: small helpers for group-aware list building and movement
+-- small helpers for group-aware list building and movement
 local function DA_IsGrouped(data)
     if not data then return false end
     if not data.group or data.group == "" or data.group == "no" then return false end
@@ -1077,7 +1061,7 @@ local function DA_ParseGroupIndex(groupName)
     return 9999
 end
 
--- NEW: category helper for ungrouped icons (shared with DoiteEdit)
+-- category helper for ungrouped icons (shared with DoiteEdit)
 local function DA_GetCategoryForEntry(entry)
     if not entry or not entry.data then return nil end
     local d = entry.data
@@ -1114,7 +1098,6 @@ local function DA_GetGroupSortMode(groupName)
 end
 
 -- Shared helpers for per-bucket Disable (groups, categories, ungrouped)
-
 local function DA_GetBucketKeyForHeaderEntry(entry)
     if not entry then return nil end
     if entry.kind == "group" then
@@ -1122,7 +1105,6 @@ local function DA_GetBucketKeyForHeaderEntry(entry)
     elseif entry.kind == "category" then
         return entry.groupName
     elseif entry.kind == "ungrouped" then
-        -- We use the same string that DA_BuildDisplayList stamps on ungrouped entries
         return "Ungrouped"
     end
     return nil
@@ -1154,15 +1136,12 @@ local function DA_IsBucketDisabled(bucketKey)
     return DoiteAurasDB.bucketDisabled[bucketKey] == true
 end
 
--- Public helper: is a given key in a disabled bucket?
--- NEW
--- Public helper: is a given key in a disabled bucket?
 local function DoiteAuras_IsKeyDisabled(key)
     if not key or not DoiteAurasDB or not DoiteAurasDB.spells then return false end
     local data = DoiteAurasDB.spells[key]
     if not data then return false end
 
-    -- Reuse our existing bucket logic
+    -- Reuse existing bucket logic
     local entry = { key = key, data = data }
     local bucketKey = DA_GetBucketKeyForCandidate(entry)
     if not bucketKey then return false end
@@ -1171,9 +1150,7 @@ local function DoiteAuras_IsKeyDisabled(key)
 end
 _G["DoiteAuras_IsKeyDisabled"] = DoiteAuras_IsKeyDisabled
 
--- When the last icon in a group/category is removed, we should also clear
--- any stale metadata about that group/category so future imports do not
--- see them as "existing" and force a "(2)", "(3)", ... rename.
+-- When the last icon in a group/category is removed, clear
 local function DA_CleanupEmptyGroupAndCategory(groupName, categoryName)
     if not DoiteAurasDB or not DoiteAurasDB.spells then
         return
@@ -1221,7 +1198,6 @@ local function DA_CleanupEmptyGroupAndCategory(groupName, categoryName)
     end
 
     -- If no icons left with this category: remove it from the global list
-    -- and drop its disabled flag.
     if categoryName and not hasCategory then
         local list = DoiteAurasDB.categories
         if list then
@@ -1243,11 +1219,6 @@ local function DA_CleanupEmptyGroupAndCategory(groupName, categoryName)
     end
 end
 
--- Build a display list for the config frame:
---  - All grouped entries first, grouped by data.group with a header row per group
---  - Then category headers (for ungrouped icons with a category)
---  - Then (optionally) an "Ungrouped" header
---  - Then all remaining plain ungrouped entries
 local function DA_BuildDisplayList(ordered)
     local groupedByName      = {}
     local groupOrderList     = {}
@@ -1326,10 +1297,6 @@ local function DA_BuildDisplayList(ordered)
         end
     end
 
-    -- Build final display list:
-    --  1) Group 1 header + members, Group 2 header + members, ...
-    --  2) Category headers + members (for ungrouped entries that have a category)
-    --  3) Optional "Ungrouped" header, then all remaining plain ungrouped entries
     local display = {}
 
     local _, groupName
@@ -1351,8 +1318,6 @@ local function DA_BuildDisplayList(ordered)
         end
     end
 
-    -- Original behaviour: Ungrouped header only when there are groups AND ungrouped
-    -- New: also show it when there are categories AND ungrouped
     local showUngroupedHeader = false
     if unTotal > 0 and (table.getn(groupOrderList) > 0 or table.getn(categoryOrderList) > 0) then
         showUngroupedHeader = true
@@ -1371,7 +1336,6 @@ local function DA_BuildDisplayList(ordered)
 end
 
 -- Move an entry within its group only; returns true if a swap occurred
--- direction = "up" (towards first) or "down" (towards last) inside that group
 local function DA_MoveOrderWithinGroup(key, direction)
     local data = DoiteAurasDB.spells[key]
     if not DA_IsGrouped(data) then return false end
@@ -1531,7 +1495,6 @@ local function FindPlayerDebuff(name)
     return false,nil
 end
 
--- Create/update icon (fixed: use offsetX/offsetY/iconSize saved fields and create global DoiteIcon_<key> frames)
 -- Create or update icon *structure only* (no positioning or texture changes here)
 local function CreateOrUpdateIcon(key, layer)
     local globalName = "DoiteIcon_" .. key
@@ -1542,10 +1505,8 @@ local function CreateOrUpdateIcon(key, layer)
         -- default size; actual sizing applied in RefreshIcons
         f:SetWidth(36)
         f:SetHeight(36)
-
-        f:EnableMouse(true)
-        f:SetMovable(true)
-        f:RegisterForDrag("LeftButton")
+        f:EnableMouse(false)
+        f:SetMovable(false)
 
         -- icon texture (created once)
         f.icon = f:CreateTexture(nil, "BACKGROUND")
@@ -1556,50 +1517,6 @@ local function CreateOrUpdateIcon(key, layer)
         fs:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -2, 2)
         fs:SetText("")
         f.count = fs
-
-        -- drag handlers: followers ignore write; leaders update DB
-        f:SetScript("OnDragStart", function()
-            -- Followers should not start moving
-            local data = GetSpellData(key)
-            if data and data.group and data.group ~= "" and data.group ~= "no" and not data.isLeader then
-                return
-            end
-            this:StartMoving()
-        end)
-
-        f:SetScript("OnDragStop", function()
-            this:StopMovingOrSizing()
-            local point, relTo, relPoint, x, y = this:GetPoint()
-            local data = GetSpellData(key)
-            -- Followers must never write offsets or trigger refresh
-            if data and data.group and data.group ~= "" and data.group ~= "no" and not data.isLeader then
-                return
-            end
-            if data then
-                data.offsetX = x or 0
-                data.offsetY = y or 0
-            end
-            if data and data.group and data.group ~= "" and data.group ~= "no" and data.isLeader then
-                if _G["DoiteGroup_Computed"] then
-                    _G["DoiteGroup_Computed"][data.group] = nil
-                end
-            end
-            if DoiteAuras_RefreshIcons then
-                if DA_RunLater then
-                    DA_RunLater(0.05, function() if DoiteAuras_RefreshIcons then pcall(DoiteAuras_RefreshIcons) end end)
-                else
-                    local fDelay = CreateFrame("Frame")
-                    local acc = 0
-                    fDelay:SetScript("OnUpdate", function()
-                        acc = acc + arg1
-                        if acc >= 0.05 then
-                            fDelay:SetScript("OnUpdate", nil)
-                            if DoiteAuras_RefreshIcons then pcall(DoiteAuras_RefreshIcons) end
-                        end
-                    end)
-                end
-            end
-        end)
     end
 
     -- Wrap Show() exactly once so bucket Disable always wins
@@ -1756,12 +1673,6 @@ local function RefreshIcons()
             f = CreateOrUpdateIcon(key, 36)
         end
 
-        -- ensure drag scripts are correct (followers cannot start dragging)
-        f:SetScript("OnDragStart", function()
-			if data and data.group and data.group ~= "" and data.group ~= "no" and not data.isLeader then return end
-			this:StartMoving()
-		end)
-
         -- compute final pos/size (group-aware, sticky)
 		local posX, posY, size
 		local isGrouped = (data and data.group and data.group ~= "" and data.group ~= "no")
@@ -1787,8 +1698,6 @@ local function RefreshIcons()
 			end
 		end
 
-		-- 3) If grouped follower and we still don't have a computed pos:
-		--    don't snap back to saved offsets; leave point untouched (sticky) until next layout.
 		if not posX then
 			if isGrouped and not isLeader then
 				-- keep current point; just use saved alpha/scale/size for visual consistency
@@ -1813,8 +1722,6 @@ local function RefreshIcons()
                 f:ClearAllPoints()
                 f:SetPoint("CENTER", UIParent, "CENTER", posX, posY)
             else
-                -- Grouped follower with no computed position this tick:
-                -- DO NOT ClearAllPoints or SetPoint; keep last good layout anchor.
             end
         end
 
@@ -1899,7 +1806,7 @@ local function RefreshList()
         entry._groupCnt = groupCount[base]
     end
 
-    -- NEW: compute per-group priority (Prio 1,2,3,... inside each group)
+    -- compute per-group priority (Prio 1,2,3,... inside each group)
     local groupMembers = {}
     for i, entry in ipairs(ordered) do
         local d = entry.data
@@ -1921,12 +1828,9 @@ local function RefreshList()
         end
     end
 
-    -- Build display list with:
-    --  Group 1 header + members, Group 2 header + members, ...
-    --  then an "Ungrouped" header (if needed), then all ungrouped entries
     local displayList = DA_BuildDisplayList(ordered)
 
-    -- NEW: compute content height based on separate header + row heights
+    -- compute content height based on separate header + row heights
     local headerCount, entryCount = 0, 0
     for _, entry in ipairs(displayList) do
         if entry.isHeader then
@@ -1938,7 +1842,7 @@ local function RefreshList()
     local totalHeight = headerCount * 25 + entryCount * 55 + 20
     listContent:SetHeight(math.max(160, totalHeight))
 
-    -- NEW: running vertical offset (tighter spacing for headers)
+    -- running vertical offset (tighter spacing for headers)
     local yOffset = 0
 
     for _, entry in ipairs(displayList) do
@@ -2163,14 +2067,11 @@ local function RefreshList()
             local typeText = baseColor .. baseLabel .. "|r|cffaaaaaa" .. suffix .. "|r"
             btn.tag:SetText(typeText)
 
-            -- Remove
--- NEW
-btn.removeBtn = CreateFrame("Button", nil, btn, "UIPanelButtonTemplate")
+	btn.removeBtn = CreateFrame("Button", nil, btn, "UIPanelButtonTemplate")
             btn.removeBtn:SetWidth(60); btn.removeBtn:SetHeight(18)
             btn.removeBtn:SetPoint("TOPRIGHT", btn, "TOPRIGHT", -5, -29)
             btn.removeBtn:SetText("Remove")
             btn.removeBtn:SetScript("OnClick", function()
-                -- Capture group/category BEFORE we mutate the DB so we can
                 -- detect if this was the last icon using them.
                 local groupName    = data and data.group
                 local categoryName = data and data.category
@@ -2204,9 +2105,6 @@ btn.removeBtn = CreateFrame("Button", nil, btn, "UIPanelButtonTemplate")
                     spellButtons[key]:Hide()
                 end
 
-                -- If this removal emptied a group and/or category, drop their
-                -- metadata so future imports won't see them as "existing" and
-                -- add "(2)", "(3)", etc.
                 if DA_CleanupEmptyGroupAndCategory then
                     DA_CleanupEmptyGroupAndCategory(groupName, categoryName)
                 end
@@ -2376,7 +2274,7 @@ addBtn:SetScript("OnClick", function()
     return
   end
 
-  -- NEW: generate unique key; baseKey groups duplicates by name+type
+  -- generate unique key; baseKey groups duplicates by name+type
   local key, baseKey, instanceIdx = GenerateUniqueKey(name, t)
 
   -- Order = append at end
@@ -2387,14 +2285,14 @@ addBtn:SetScript("OnClick", function()
     order = nextOrder,
     type  = t,
     displayName = name,
-    baseKey = baseKey,  -- helpful but not required (we still compute BaseKeyFor on the fly)
-    uid = instanceIdx,  -- 1 for the first, 2,3,... for next siblings
+    baseKey = baseKey,
+    uid = instanceIdx,
   }
 
   local entry = DoiteAurasDB.spells[key]
   local cache = DA_Cache()
 
-  -- Auto-prime texture when we can:
+  -- Auto-prime texture
   if t == "Ability" then
     local slot = FindSpellBookSlot(name)
     if slot then
@@ -2625,7 +2523,7 @@ SlashCmdList["DAVERSIONWHO"] = function()
   end
 end
 
--- Small delayed runner (Vanilla/Turtle: use arg1 in OnUpdate)
+-- Small delayed runner
 function DA_RunLater(delay, func)
   local f = CreateFrame("Frame")
   local acc = 0
@@ -2650,7 +2548,6 @@ _daVer:SetScript("OnEvent", function()
   local cf   = (DEFAULT_CHAT_FRAME or ChatFrame1)
 
   if text == "DA_WHO" then
-    -- someone asked; tell them our version back on the same channel
     if channel and SendAddonMessage then
       SendAddonMessage(DA_PREFIX, "DA_ME:" .. mine, channel)
     end
@@ -2725,7 +2622,7 @@ _daLoad:SetScript("OnEvent", function()
     end)
 
   elseif event == "RAID_ROSTER_UPDATE" then
-    -- first time you are in a raid: announce on RAID after ~3s
+    -- first time player are in a raid: announce on RAID after ~3s
     if not _daRaidAnnounced and UnitInRaid and UnitInRaid("player") then
       _daRaidAnnounced = true
       DA_RunLater(3, function()

@@ -1,6 +1,8 @@
+---------------------------------------------------------------
 -- DoiteEdit.lua
 -- Secondary frame for editing Aura conditions / edit UI
--- Attached to DoiteAuras main frame (DoiteAurasFrame)
+-- WoW 1.12 | Lua 5.0
+---------------------------------------------------------------
 
 if DoiteConditionsFrame then
     DoiteConditionsFrame:Hide()
@@ -21,11 +23,11 @@ local Category_UpdateButtonState = nil
 local Category_AddFromUI = nil
 local Category_RemoveSelected = nil
 
--- Per-type containers for the new dynamic "Aura Conditions" rows
+
 local AuraCond_Managers = {}
-local AuraCond_RegisterManager -- called from CreateConditionsUI
-local AuraCond_RefreshFromDB   -- called from UpdateConditionsUI
-local AuraCond_ResetEditing    -- currently a no-op, reserved for future if needed
+local AuraCond_RegisterManager
+local AuraCond_RefreshFromDB
+local AuraCond_ResetEditing
 
 -- class gate used by UpdateConditionsUI and others
 local function _IsRogueOrDruid()
@@ -39,7 +41,6 @@ local function _HasCursive()
     if type(Cursive) ~= "table" then return false end
     local curses = Cursive.curses
     if type(curses) ~= "table" then return false end
-    -- We only test for APIs we plan to rely on; no calls are made here.
     if type(curses.GetCurseData) ~= "function" then return false end
     if type(curses.TimeRemaining) ~= "function" then return false end
     return true
@@ -587,7 +588,6 @@ local function SetCombatFlag(typeTable, which, enabled)
 end
 
 local function SetExclusiveTargetMode(mode)
-    -- legacy no-op; we now use ability.targetHelp/targetHarm/targetSelf
     if not currentKey then return end
     local d = EnsureDBEntry(currentKey)
     if d and d.conditions and d.conditions.ability then
@@ -1167,7 +1167,6 @@ local function CreateConditionsUI()
     -- Checkbox: "Categorize (eg. Boss debuffs)"
     condFrame.categoryCheck = CreateFrame("CheckButton", "DoiteCond_Category_Check", condFrame, "UICheckButtonTemplate")
     condFrame.categoryCheck:SetWidth(20); condFrame.categoryCheck:SetHeight(20)
-    -- Position is approximate; you can move it later. No frame size changes.
     condFrame.categoryCheck:SetPoint("Left", condFrame.groupDD, "Right", -10, 0)
     condFrame.categoryCheck.text = condFrame.categoryCheck:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     condFrame.categoryCheck.text:SetPoint("LEFT", condFrame.categoryCheck, "RIGHT", 4, 0)
@@ -1178,12 +1177,12 @@ local function CreateConditionsUI()
     condFrame.categoryInput = CreateFrame("EditBox", "DoiteCond_Category_Input", condFrame, "InputBoxTemplate")
     condFrame.categoryInput:SetAutoFocus(false)
     condFrame.categoryInput:SetHeight(18)
-    condFrame.categoryInput:SetWidth(75) -- short input
+    condFrame.categoryInput:SetWidth(75)
     condFrame.categoryInput:SetPoint("BOTTOMLEFT", condFrame.groupLabel, "BOTTOMLEFT", 0, -32)
     condFrame.categoryInput:SetFontObject("GameFontNormalSmall")
     condFrame.categoryInput:SetJustifyH("LEFT")
 	if condFrame.categoryInput.SetTextColor then
-        condFrame.categoryInput:SetTextColor(1, 1, 1)  -- white text in the input
+        condFrame.categoryInput:SetTextColor(1, 1, 1)
     end
 
     -- Add/Remove button ("<-Add" / "Remove->")
@@ -1264,7 +1263,7 @@ local function CreateConditionsUI()
             return
         end
 
-        -- We have categories: build the real menu
+        -- Categories: build the real menu
         UIDropDownMenu_Initialize(dd, function(frame, level, menuList)
             local info
             for _, name in ipairs(list) do
@@ -1302,7 +1301,7 @@ local function CreateConditionsUI()
             end
         end)
 
-        -- Ensure button is enabled again now that we have entries
+        -- Ensure button is enabled again now that have entries
         local btn = _G[dd:GetName().."Button"]
         if btn and btn.Enable then
             btn:Enable()
@@ -1570,7 +1569,6 @@ condFrame.categoryCheck:SetScript("OnClick", function()
     Category_UpdateButtonState()
     SafeRefresh(); SafeEvaluate()
 
-    -- IMPORTANT: only re-sync UI from DB when we actually *cleared* the category
     if UpdateCondFrameForKey and not checked then
         UpdateCondFrameForKey(currentKey)
     end
@@ -3037,7 +3035,6 @@ end
 local function _ReflowCondAreaHeight()
     if not condFrame then return end
 
-    -- Try both "_condArea" and "condArea" as the scroll child/content parent.
     -- Fallback to the frame itself if no explicit content frame exists.
     local parent = condFrame._condArea or condFrame.condArea or condFrame
     if not parent or not parent.GetChildren then return end
@@ -3045,7 +3042,6 @@ local function _ReflowCondAreaHeight()
     local children = { parent:GetChildren() }
     if not children or not children[1] then return end
 
-    -- We want the *bottom* of the lowest visible child: bottom = y - height
     local minBottom = nil
 
     local i = 1
@@ -3615,7 +3611,7 @@ do
         local n = AuraCond_Len(list)
         list[n+1] = entry
 
-        -- rebuild so we get a fresh saved row and a new clean editing row
+        -- rebuild so a fresh saved row and a new clean editing row
         AuraCond_RebuildFromDB_Internal(mgr.typeKey)
         _ReflowCondAreaHeight()
     end
@@ -3739,10 +3735,6 @@ do
         YellowifyButton(row.closeBtn)
 
         -- progression buttons:
-        -- STEP1: Ability / Buff / Debuff
-        -- STEP2: (Ability) Not on cooldown / On cooldown
-        --         (Aura)   Found / Missing
-        -- STEP3: (Aura only) On player / On target
         row.btn1:SetScript("OnClick", function()
             if not currentKey then return end
             local state = row._state
@@ -4908,7 +4900,7 @@ local function UpdateConditionsUI(data)
             condFrame.cond_aura_mine:Show()
 
             if isBuff then
-                -- BUFF: cannot reliably track “My Aura” → always off + grey, new hint
+                -- BUFF: cannot reliably track “My Aura” → always off + grey, hint
                 condFrame.cond_aura_mine:SetChecked(false)
                 _disableCheck(condFrame.cond_aura_mine)
                 if c.aura then c.aura.onlyMine = nil end
@@ -4970,7 +4962,6 @@ local function UpdateConditionsUI(data)
         -- Row 10: Text flags (Text: stack + Text: remaining)
         if amode == "found" then
             -- === Text: Stack counter ===
-            -- Always allowed for any aura we can scan (buff or debuff, any target).
             condFrame.cond_aura_text_stack:Show()
             _enableCheck(condFrame.cond_aura_text_stack)
             condFrame.cond_aura_text_stack:SetChecked((c.aura and c.aura.textStackCounter) or false)
@@ -5108,7 +5099,7 @@ local function UpdateConditionsUI(data)
                     end
                     _hideRemInputs()
                 else
-                    -- We have Cursive; apply My Aura rules
+                    -- Cursive; apply My Aura rules
                     if onlyMine then
                         -- My Aura checked -> user controls Remaining
                         _enableCheck(condFrame.cond_aura_remaining_cb)
@@ -5590,15 +5581,15 @@ function DoiteConditions_Show(key)
         if sep2.SetVertexColor then sep2:SetVertexColor(1,1,1,0.25) end
 
 		-- === Scrollable container for CONDITIONS & RULES (no size/pos changes elsewhere) ===
-		-- Create once and reuse; anchors live between the "CONDITIONS & RULES" line and before "POSITION & SIZE"
+
 		if not condFrame.condListContainer then
-			local cW = condFrame:GetWidth() - 43  -- leave the same left/right padding as lines
-			local cH = 210                         -- fits the current space; contents will scroll as it grows
+			local cW = condFrame:GetWidth() - 43
+			local cH = 210
 
 			local listContainer = CreateFrame("Frame", nil, condFrame)
 			listContainer:SetWidth(cW)
 			listContainer:SetHeight(cH)
-			listContainer:SetPoint("TOPLEFT", condFrame, "TOPLEFT", 14, -143)  -- just below sep2 line
+			listContainer:SetPoint("TOPLEFT", condFrame, "TOPLEFT", 14, -143)
 			listContainer:SetBackdrop({
 				bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
 				edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
@@ -5616,18 +5607,17 @@ function DoiteConditions_Show(key)
 
 			local listContent = CreateFrame("Frame", "DoiteConditionsListContent", scrollFrame)
 			listContent:SetWidth(cW - 20)
-			listContent:SetHeight(cH - 10)  -- will be increased by controls; scrollFrame will handle overflow
+			listContent:SetHeight(cH - 10)
 			scrollFrame:SetScrollChild(listContent)
-			condFrame._condArea = listContent  -- parent for all condition controls
+			condFrame._condArea = listContent
 			
-			listContent:SetHeight(900)  -- big enough to cover all rows; tweak if you add more
+			listContent:SetHeight(900)
 
 			-- 2) Make absolutely sure the visual stacking (levels) keeps the backdrop under the controls.
-			--    (WoW 1.12 supports FrameLevel; parent/child constraints still apply, but this bumps things correctly.)
 			local baseLevel = condFrame:GetFrameLevel() or 1
-			listContainer:SetFrameLevel(baseLevel + 0)   -- backdrop holder
-			scrollFrame:SetFrameLevel(baseLevel + 1)     -- the scroller itself
-			listContent:SetFrameLevel(baseLevel + 2)     -- the actual area where controls live
+			listContainer:SetFrameLevel(baseLevel + 0)
+			scrollFrame:SetFrameLevel(baseLevel + 1)
+			listContent:SetFrameLevel(baseLevel + 2)
 
 			-- Optional (helps click/scroll behavior feel solid)
 			if scrollFrame.EnableMouseWheel then
@@ -5701,7 +5691,7 @@ function DoiteConditions_Show(key)
 			-- on release: stop pausing and do a single heavy repaint
 			s:SetScript("OnMouseUp", function()
 				_G["DoiteUI_Dragging"] = false
-				DoiteEdit_FlushHeavy()  -- single combined refresh/evaluate
+				DoiteEdit_FlushHeavy()
 			end)
 
             -- editbox commit helper (clamp + set slider)
@@ -5724,7 +5714,7 @@ function DoiteConditions_Show(key)
                 end
             end
 
-            -- editbox -> slider while typing (WoW 1.12 has no userInput arg)
+            -- editbox -> slider while typing
 			eb:SetScript("OnTextChanged", function()
 				if this._updating then return end
 				local txt = this:GetText()

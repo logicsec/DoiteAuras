@@ -1,6 +1,8 @@
+---------------------------------------------------------------
 -- DoiteGroup.lua
 -- Handles grouped layout logic for DoiteAuras icons
--- Turtle WoW 1.12 / Lua 5.0
+-- WoW 1.12 | Lua 5.0
+---------------------------------------------------------------
 
 -- Use a global-named table (compatible with older loader behavior)
 local DoiteGroup = _G["DoiteGroup"] or {}
@@ -188,7 +190,7 @@ local function ComputeGroupLayout(entries, groupName)
 					-- While editing: do not block or force-hide this member
 					f._daBlockedByGroup = false
 				else
-					f._daBlockedByGroup = true   -- mark as over the group limit
+					f._daBlockedByGroup = true
 					if f:IsShown() then
 						f:Hide()
 					end
@@ -243,7 +245,7 @@ end
 ---------------------------------------------------------------
 -- Lightweight watcher: detects changes in shown/order and reflows
 ---------------------------------------------------------------
--- We recompute only when the group “signature” changes.
+-- recompute only when the group “signature” changes.
 local _watch = CreateFrame("Frame")
 local _acc   = 0
 local _lastSig = {}

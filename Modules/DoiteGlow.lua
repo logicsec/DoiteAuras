@@ -1,5 +1,8 @@
+---------------------------------------------------------------
 -- DoiteGlow.lua
--- Simple 1.12 compatible glow effect inspired by ActionButtonUtils
+-- Simple compatible glow effect inspired by ActionButtonUtils
+-- WoW 1.12 | Lua 5.0
+---------------------------------------------------------------
 
 local DG = {}
 _G["DoiteGlow"] = DG
@@ -15,7 +18,7 @@ local texCoords = {
 
 local pool = {}
 local numOverlays = 0
-local updateInterval = 0.04 -- 25 FPS
+local updateInterval = 0.04
 
 local function NextIndex(i)
 	if i >= 22 then return 1 else return i + 1 end
@@ -28,12 +31,12 @@ local function GetOverlay()
 		overlay = CreateFrame("Frame", "DoiteGlowOverlay"..numOverlays)
 		overlay:SetFrameStrata("TOOLTIP")
 
-		overlay.bg = overlay:CreateTexture(nil, "ARTWORK")   -- was "BACKGROUND"
+		overlay.bg = overlay:CreateTexture(nil, "ARTWORK")
 		overlay.bg:SetTexture("Interface\\AddOns\\DoiteAuras\\Textures\\IconAlert")
 		overlay.bg:SetTexCoord(0.0546, 0.4609, 0.3007, 0.5039)
 		overlay.bg:SetAllPoints(overlay)
 
-		overlay.glow = overlay:CreateTexture(nil, "OVERLAY") -- was "MEDIUM"
+		overlay.glow = overlay:CreateTexture(nil, "OVERLAY")
 		overlay.glow:SetTexture("Interface\\AddOns\\DoiteAuras\\Textures\\IconAlertAnts")
 		overlay.glow:SetTexCoord(texCoords[1][1], texCoords[1][2], texCoords[1][3], texCoords[1][4])
 		overlay.glow:SetAllPoints(overlay)

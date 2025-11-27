@@ -1,5 +1,8 @@
+---------------------------------------------------------------
 -- DoiteExport.lua
--- Import/Export UI for DoiteAuras (kept separate so DoiteAuras.lua stays clean)
+-- Import/Export UI for DoiteAuras
+-- WoW 1.12 | Lua 5.0
+---------------------------------------------------------------
 
 DoiteExport = DoiteExport or {}
 
@@ -11,7 +14,6 @@ local gsub    = string.gsub
 local mod     = math.mod or math.fmod
 
 -- ========= LZW compression / decompression (pfUI-style) =========
-
 local function DE_Compress(input)
     -- based on Rochet2's lzw compression
     if type(input) ~= "string" then
@@ -245,7 +247,7 @@ local function DE_Decode(to_decode)
     return decoded
 end
 
--- Wrap/unwrap helper for our export bodies
+-- Wrap/unwrap helper for export bodies
 local function DE_EncodeCompressed(body)
     local c = DE_Compress(body)
     if not c then return nil end
@@ -262,7 +264,7 @@ local exportFrame, importFrame
 local exportEditBox, exportScrollFrame
 local importEditBox, importScrollFrame
 local exportRows = {}
-local allRow = nil       -- "-- EVERYTHING --" row reference
+local allRow = nil
 
 -- ========= Helpers over DoiteAurasDB =========
 
@@ -306,8 +308,7 @@ local function DE_HasGroupOrCategory()
 end
 
 -- ========= Export/Import Data Helpers =========
-
--- Deep copy of a table (no assumptions about cycles; we guard anyway).
+-- Deep copy of a table
 local function DE_DeepCopy(src, seen)
     if type(src) ~= "table" then
         return src
@@ -349,10 +350,6 @@ local function DE_FindFreeName(base, existing)
 end
 
 -- Build a package table from a list of spell keys.
--- This is the structure we serialize to a DA1 export string.
--- context:
---   exportAll (bool)           -> true when "-- EVERYTHING --" is used
---   groupsToPreserve[name]     -> only icons belonging to these groups keep .group
 local function DE_BuildExportPackage(keys, context)
     if not DoiteAurasDB or not DoiteAurasDB.spells or not keys then
         return nil
@@ -520,7 +517,7 @@ local function DE_ParseExportString(str)
     local body
 
     if strsub(str, 1, strlen(prefix2)) == prefix2 then
-        -- New compressed+encoded format
+        -- compressed+encoded format
         local encoded = strsub(str, strlen(prefix2) + 1)
         local decoded = DE_DecodeCompressed(encoded)
         if not decoded then
@@ -739,9 +736,6 @@ end
 
 local function DE_MakeTopMost(frame)
     if not frame then return end
-
-    -- Put the frame on a high strata so it appears above /da,
-    -- but DON'T change frame level or it will draw its backdrop above children.
     frame:SetFrameStrata("TOOLTIP")
 end
 
@@ -943,10 +937,6 @@ local function DE_RebuildExportList()
 
     -- Helper: icon behavior: children are independent; do NOT auto-toggle header.
     local function SetupIconBehavior(iconRow)
-        -- Intentionally empty: default checkbox behaviour is enough.
-        -- Group header state is independent so you can:
-        -- - Use header to (un)check all children
-        -- - Uncheck a few children while header remains checked
     end
 
     -- 1) Groups + their icons
@@ -1051,7 +1041,6 @@ local function DE_CreateExportFrame()
 
     local f = CreateFrame("Frame", "DoiteAurasExportFrame", UIParent)
     exportFrame = f
-    -- Wider frame so we can have the list on the left and a big export box on the right
     f:SetWidth(620)
     f:SetHeight(360)
     f:SetPoint("CENTER", UIParent, "CENTER", 0, 40)
@@ -1087,7 +1076,6 @@ local function DE_CreateExportFrame()
     close:SetScript("OnClick", function() f:Hide() end)
 
     -- Scrollable container for the tree (EVERYTHING / groups / categories / icons)
-    -- Keep this the same size as before so it doesn't shrink
     local listContainer = CreateFrame("Frame", nil, f)
     listContainer:SetWidth(260)
     listContainer:SetHeight(275)
@@ -1229,14 +1217,11 @@ local function DE_CreateExportFrame()
         DE_UpdateCopyButton()
     end)
 
--- NEW
 -- Big export box on the RIGHT, non-scrollable edit box
     local boxContainer = CreateFrame("Frame", nil, f)
     boxContainer:SetPoint("TOPLEFT", listContainer, "TOPRIGHT", 15, 0)
-
-    -- *** WIDTH / HEIGHT CONTROL A: outer export box ***
-    boxContainer:SetWidth(300)    -- change this to make the whole export area wider/narrower
-    boxContainer:SetHeight(140)   -- change this to make the export area taller/shorter
+    boxContainer:SetWidth(300)
+    boxContainer:SetHeight(140)
 
     boxContainer:SetBackdrop({
         bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
@@ -1248,9 +1233,6 @@ local function DE_CreateExportFrame()
     label:SetPoint("TOPLEFT", boxContainer, "TOPLEFT", 6, -6)
     label:SetText("Export string:")
 
--- NEW (ScrollFrame again, but with the scrollbar hidden)
-    -- Multiline export box inside a ScrollFrame so text is clipped to the box.
-    -- We hide the scrollbar so the UI stays clean.
     local textScroll = CreateFrame("ScrollFrame", "DoiteAurasExportTextScroll", boxContainer, "UIPanelScrollFrameTemplate")
     textScroll:SetPoint("TOPLEFT", boxContainer, "TOPLEFT", 6, -22)
     textScroll:SetPoint("BOTTOMRIGHT", boxContainer, "BOTTOMRIGHT", -8, 6)
@@ -1281,8 +1263,7 @@ local function DE_CreateExportFrame()
 
     textScroll:SetScrollChild(edit)
 
-    -- Hide the scrollbar and its buttons so the user doesn't see them,
-    -- but we still benefit from clipping/scrolling.
+    -- Hide the scrollbar and its buttons so the user doesn't see them
     local scrollBar = getglobal(textScroll:GetName() .. "ScrollBar")
     if scrollBar then
         scrollBar:Hide()
@@ -1372,12 +1353,16 @@ function DoiteExport_ShowExportFrame()
     if not exportFrame then
         DE_CreateExportFrame()
     end
+
+    -- If the import frame is open, close it so only one is visible
+    if importFrame and importFrame:IsShown() then
+        importFrame:Hide()
+    end
+
     exportFrame:Show()
 end
 
 -- ========= Import Frame =========
-
--- NEW
 local function DE_CreateImportFrame()
     if importFrame then return end
 
@@ -1418,7 +1403,6 @@ local function DE_CreateImportFrame()
     close:SetPoint("TOPRIGHT", f, "TOPRIGHT", -5, -5)
     close:SetScript("OnClick", function() f:Hide() end)
 
--- NEW (ScrollFrame + hidden scrollbar, still very "clickable")
     local boxContainer = CreateFrame("Frame", nil, f)
     -- Match the export box size so both sides feel consistent
     boxContainer:SetWidth(210)
@@ -1478,7 +1462,6 @@ local function DE_CreateImportFrame()
     importEditBox = edit
     importScrollFrame = scroll
 
--- NEW
     -- Import button (centered beneath the box)
     local importBtn = CreateFrame("Button", "DoiteAurasImportDoButton", f, "UIPanelButtonTemplate")
     importBtn:SetWidth(80)
@@ -1559,9 +1542,13 @@ local function DE_CreateImportFrame()
         if chat then
             chat:AddMessage("|cff6FA8DCDoiteAuras:|r " .. msg)
         end
+
+        -- Close the import frame after a successful import
+        if importFrame and importFrame.Hide then
+            importFrame:Hide()
+        end
     end)
 
--- NEW
     local hint = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     -- Place the explanation above the input box, under the title/separator
     hint:SetPoint("TOPLEFT", f, "TOPLEFT", 20, -40)
@@ -1588,5 +1575,11 @@ function DoiteExport_ShowImportFrame()
     if not importFrame then
         DE_CreateImportFrame()
     end
+
+    -- If the export frame is open, close it so only one is visible
+    if exportFrame and exportFrame:IsShown() then
+        exportFrame:Hide()
+    end
+
     importFrame:Show()
 end
