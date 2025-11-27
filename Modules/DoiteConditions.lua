@@ -150,13 +150,50 @@ end
 -- Tooltip-driven name fetch for a specific aura slot
 local function _GetAuraName(unit, index, isDebuff)
     _EnsureTooltip()
+    if not unit or not index or index < 1 then return nil end
+
+    -- First confirm this index actually has an aura using the documented API
+    local tex
+    if isDebuff then
+        tex = UnitDebuff(unit, index)
+    else
+        tex = UnitBuff(unit, index)
+    end
+    if not tex then
+        return nil
+    end
+
     DoiteConditionsTooltip:ClearLines()
     if isDebuff then
         DoiteConditionsTooltip:SetUnitDebuff(unit, index)
     else
         DoiteConditionsTooltip:SetUnitBuff(unit, index)
     end
-    return DoiteConditionsTooltipTextLeft1 and DoiteConditionsTooltipTextLeft1:GetText()
+
+    -- Normal case: the template created DoiteConditionsTooltipTextLeft1
+    local fs1 = _G["DoiteConditionsTooltipTextLeft1"]
+    if fs1 and fs1.GetText then
+        local txt = fs1:GetText()
+        if txt and txt ~= "" then
+            return txt
+        end
+    end
+
+    -- Fallback: scan all left text lines just in case the template is odd
+    local i = 1
+    while true do
+        local fs = _G["DoiteConditionsTooltipTextLeft" .. i]
+        if not fs or not fs.GetText then
+            break
+        end
+        local t = fs:GetText()
+        if t and t ~= "" then
+            return t
+        end
+        i = i + 1
+    end
+
+    return nil
 end
 
 local function _ScanUnitAuras(unit)
@@ -168,46 +205,57 @@ local function _ScanUnitAuras(unit)
     local snap = auraSnapshot[unit]
     if not snap then return end
     local buffs, debuffs = snap.buffs, snap.debuffs
+    if not buffs or not debuffs then return end
+
+    -- Clear previous snapshot
     for k in pairs(buffs) do buffs[k] = nil end
     for k in pairs(debuffs) do debuffs[k] = nil end
 
+    ----------------------------------------------------------------
     -- BUFFS
+    ----------------------------------------------------------------
     local i = 1
     while true do
-        DoiteConditionsTooltip:ClearLines()
-        DoiteConditionsTooltip:SetUnitBuff(unit, i)
-        local tn = DoiteConditionsTooltipTextLeft1 and DoiteConditionsTooltipTextLeft1:GetText()
-        if not tn then break end
-        buffs[tn] = true
+        -- Use the documented API to detect if this slot actually has a buff
+        local tex = UnitBuff(unit, i)
+        if not tex then
+            break -- no more buffs at this index
+        end
 
-        local list = trackedByName and trackedByName[tn]
-        -- list should be a table of icon keys; guard just in case
-        if list and type(list) == "table" then
-            local tex = UnitBuff(unit, i)
-            if tex and tn and IconCache[tn] ~= tex then
-                IconCache[tn] = tex
-                DoiteAurasDB.cache[tn] = tex
+        -- Tooltip-based name lookup (safe even if tooltip has no text)
+        local tn = _GetAuraName(unit, i, false)
+        if tn and tn ~= "" then
+            buffs[tn] = true
 
-                local count = table.getn(list)
-                local j = 1
-                while j <= count do
-                    local key = list[j]
+            local list = trackedByName and trackedByName[tn]
+            if list and type(list) == "table" then
+                if IconCache[tn] ~= tex then
+                    IconCache[tn] = tex
+                    DoiteAurasDB.cache[tn] = tex
 
-                    -- 1) Update DB spell icon
-                    if DoiteAurasDB.spells then
-                        local s = DoiteAurasDB.spells[key]
-                        if s then
-                            s.iconTexture = tex
+                    local count = table.getn(list)
+                    local j = 1
+                    while j <= count do
+                        local key = list[j]
+
+                        if key then
+                            -- 1) Update DB spell icon
+                            if DoiteAurasDB.spells then
+                                local s = DoiteAurasDB.spells[key]
+                                if s then
+                                    s.iconTexture = tex
+                                end
+                            end
+
+                            -- 2) Update live icon frame texture
+                            local f = _G["DoiteIcon_" .. key]
+                            if f and f.icon and f.icon:GetTexture() ~= tex then
+                                f.icon:SetTexture(tex)
+                            end
                         end
-                    end
 
-                    -- 2) Update live icon frame texture
-                    local f = _G["DoiteIcon_" .. key]
-                    if f and f.icon and (f.icon:GetTexture() ~= tex) then
-                        f.icon:SetTexture(tex)
+                        j = j + 1
                     end
-
-                    j = j + 1
                 end
             end
         end
@@ -215,43 +263,50 @@ local function _ScanUnitAuras(unit)
         i = i + 1
     end
 
+    ----------------------------------------------------------------
     -- DEBUFFS
+    ----------------------------------------------------------------
     i = 1
     while true do
-        DoiteConditionsTooltip:ClearLines()
-        DoiteConditionsTooltip:SetUnitDebuff(unit, i)
-        local tn = DoiteConditionsTooltipTextLeft1 and DoiteConditionsTooltipTextLeft1:GetText()
-        if not tn then break end
-        debuffs[tn] = true
+        -- Same API, but debuffs
+        local tex = UnitDebuff(unit, i)
+        if not tex then
+            break -- no more debuffs at this index
+        end
 
-        local list = trackedByName and trackedByName[tn]
-        -- list should be a table of icon keys; guard just in case
-        if list and type(list) == "table" then
-            local tex = UnitDebuff(unit, i)
-            if tex and tn and IconCache[tn] ~= tex then
-                IconCache[tn] = tex
-                DoiteAurasDB.cache[tn] = tex
+        local tn = _GetAuraName(unit, i, true)
+        if tn and tn ~= "" then
+            debuffs[tn] = true
 
-                local count = table.getn(list)
-                local j = 1
-                while j <= count do
-                    local key = list[j]  -- plain icon key string
+            local list = trackedByName and trackedByName[tn]
+            if list and type(list) == "table" then
+                if IconCache[tn] ~= tex then
+                    IconCache[tn] = tex
+                    DoiteAurasDB.cache[tn] = tex
 
-                    -- 1) Update DB spell icon
-                    if DoiteAurasDB.spells then
-                        local s = DoiteAurasDB.spells[key]
-                        if s then
-                            s.iconTexture = tex
+                    local count = table.getn(list)
+                    local j = 1
+                    while j <= count do
+                        local key = list[j]
+
+                        if key then
+                            -- 1) Update DB spell icon
+                            if DoiteAurasDB.spells then
+                                local s = DoiteAurasDB.spells[key]
+                                if s then
+                                    s.iconTexture = tex
+                                end
+                            end
+
+                            -- 2) Update live icon frame texture
+                            local f = _G["DoiteIcon_" .. key]
+                            if f and f.icon and f.icon:GetTexture() ~= tex then
+                                f.icon:SetTexture(tex)
+                            end
                         end
-                    end
 
-                    -- 2) Update live icon frame texture
-                    local f = _G["DoiteIcon_" .. key]
-                    if f and f.icon and (f.icon:GetTexture() ~= tex) then
-                        f.icon:SetTexture(tex)
+                        j = j + 1
                     end
-
-                    j = j + 1
                 end
             end
         end
@@ -1214,44 +1269,26 @@ local function _CursiveAuraRemainingSeconds(spellName, unit)
     return nil
 end
 
--- Use Cursive.curses:HasCurse to evaluate a remaining-time comparison on a unit.
--- Returns:
---   true/false => Cursive answered and comparison passed/failed
---   nil        => Cursive couldn't answer (no guid / no API / no curse)
+-- Use Cursive: to evaluate a remaining-time comparison on a unit.
 local function _CursiveRemainingPass(spellName, unit, comp, threshold)
     if not spellName or not unit or not comp or threshold == nil then
         return nil
     end
-    if not (Cursive and Cursive.curses and Cursive.curses.HasCurse) then
+    if not _HasCursive() then
         return nil
     end
 
-    local guid = _GetUnitGuid(unit)
-    if not guid then return nil end
-
-    local key = string.lower(spellName)
-
-    if comp == ">=" then
-        return Cursive.curses:HasCurse(key, guid, threshold) and true or false
-
-    elseif comp == "<=" then
-        -- "≤ X" : must be active at all AND NOT active with remaining > X
-        if not Cursive.curses:HasCurse(key, guid, 0) then
-            return false
-        end
-        return not Cursive.curses:HasCurse(key, guid, threshold + 0.01)
-
-    elseif comp == "==" then
-        -- Treat "==" as "inside a small window around threshold"
-        local low  = math.max(threshold - 0.25, 0)
-        local high = threshold + 0.25
-        if not Cursive.curses:HasCurse(key, guid, low) then
-            return false
-        end
-        return not Cursive.curses:HasCurse(key, guid, high + 0.01)
+    local data = _CursiveGetCurseData(spellName, unit)
+    if not data then
+        return nil
     end
 
-    return nil
+    local rem = Cursive.curses:TimeRemaining(data)
+    if not rem or rem <= 0 then
+        return nil
+    end
+
+    return _RemainingPasses(rem, comp, threshold)
 end
 
 -- === AuraConditions helpers (Ability/Aura/Item) ==========================
@@ -1404,14 +1441,18 @@ local function _UnitHasAnyBuffName(unit, names)
         end
     end
 
-    -- 2) Live probe (tooltip-named), up to 40 slots like elsewhere in this file
+    -- 2) Live probe (tooltip-named), using the same UnitBuff-driven bounds
     local i = 1
-    while i <= 40 do
+    while true do
+        local tex = UnitBuff(unit, i)
+        if not tex then break end
+
         local n = _GetAuraName(unit, i, false)
-        if not n then break end
-        for j = 1, table.getn(names) do
-            if n == names[j] then
-                return true
+        if n then
+            for j = 1, table.getn(names) do
+                if n == names[j] then
+                    return true
+                end
             end
         end
         i = i + 1
