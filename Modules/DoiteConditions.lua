@@ -1491,10 +1491,22 @@ local function _AuraConditions_CheckEntry(entry)
 end
 
 local function _EvaluateAuraConditionsList(list)
-    if not list then return true end
-    local n = table.getn(list)
-    if n == 0 then return true end
+    if not list then
+        return true
+    end
 
+    local n = table.getn(list)
+    if n == 0 then
+        return true
+    end
+
+    -- Prefer the new DoiteLogic module if it exists
+    local DL = _G["DoiteLogic"]
+    if DL and DL.EvaluateAuraList then
+        return DL.EvaluateAuraList(list, _AuraConditions_CheckEntry)
+    end
+
+    -- Fallback: original strict AND semantics (backwards compatible)
     local i = 1
     while i <= n do
         if not _AuraConditions_CheckEntry(list[i]) then
@@ -1602,18 +1614,557 @@ local function _GetComboPointsSafe()
     return cp
 end
 
--- Is a class that uses combo points?
+-- Class that uses combo points
 local function _PlayerUsesComboPoints()
     local _, cls = UnitClass("player")
     cls = cls and string.upper(cls) or ""
     return (cls == "ROGUE" or cls == "DRUID")
 end
 
+-- === Target Distance / AoE / Unit Type helpers ==========================
+
+-- These can be overridden at runtime if you want different defaults.
+_G.DoiteConditions_SingleCloseThresholdYds = _G.DoiteConditions_SingleCloseThresholdYds or 8   -- "no other NPC close" for Single target
+_G.DoiteConditions_AoeRangeThresholdYds    = _G.DoiteConditions_AoeRangeThresholdYds  or 10  -- default for "AOE (Range)"
+_G.DoiteConditions_AoeMeleeThresholdYds    = _G.DoiteConditions_AoeMeleeThresholdYds  or 5   -- default for "AOE (Melee)"
+
+-- Mapping used by the editor labels ("1. Humanoid", "Multi: 1+2", etc.)
+local UNIT_TYPE_INDEX_MAP = {
+    [1] = "Humanoid",
+    [2] = "Beast",
+    [3] = "Dragonkin",
+    [4] = "Undead",
+    [5] = "Demon",
+    [6] = "Giant",
+    [7] = "Mechanical",
+    [8] = "Elemental",
+}
+
+-- Normalizes "Any"/nil/"" → nil (meaning "no restriction")
+local function _NormalizeTargetField(val)
+    if not val or val == "" or val == "Any" then
+        return nil
+    end
+    return val
+end
+
+-- Optional: spell range in yards from DBC ("rangeMax" is yards * 10)
+local function _GetSpellMaxRangeYds(spellName)
+    if not spellName or not GetSpellIdForName or not GetSpellRecField then
+        return nil
+    end
+    local sid = GetSpellIdForName(spellName)
+    if not sid or sid <= 0 then return nil end
+
+    local raw = GetSpellRecField(sid, "rangeMax")
+    if not raw or raw <= 0 then return nil end
+
+    return raw / 10
+end
+
+---------------------------------------------------------------
+-- Spell range overrides and resurrection spell list
+---------------------------------------------------------------
+
+-- Spells whose IsSpellInRange return values are unreliable; treat them as explicit melee or ranged for distance checks instead of trusting API.
+local _SpellRangeOverrideByClass = {
+    WARRIOR = {
+        -- These always report 1 from IsSpellInRange() in your tests.
+        ["Heroic Strike"] = "melee",
+        ["Cleave"]        = "melee",
+        -- Add more warrior spells here if needed.
+    },
+    -- Add other classes here if I discover more broken spells.
+}
+
+local _SpellRangeOverrideCache = {}
+local _playerClass = nil
+
+local function _GetPlayerClassToken()
+    if _playerClass and _playerClass ~= "" then
+        return _playerClass
+    end
+    if UnitClass then
+        local _, cls = UnitClass("player")
+        _playerClass = cls and string.upper(cls) or ""
+    else
+        _playerClass = ""
+    end
+    return _playerClass
+end
+
+local function _GetSpellRangeOverrideMode(spellName)
+    if not spellName then return nil end
+
+    local cached = _SpellRangeOverrideCache[spellName]
+    if cached ~= nil then
+        return (cached ~= false) and cached or nil
+    end
+
+    local cls = _GetPlayerClassToken()
+    local mode = nil
+    local byClass = _SpellRangeOverrideByClass[cls]
+    if byClass then
+        mode = byClass[spellName]
+    end
+
+    if mode then
+        _SpellRangeOverrideCache[spellName] = mode
+        return mode
+    end
+
+    _SpellRangeOverrideCache[spellName] = false
+    return nil
+end
+
+-- Resurrection spells that are allowed to do distance checks on dead friendly targets.
+local _ResurrectionSpellByName = {
+    ["Rebirth"]          = true, -- Druid
+    ["Redemption"]       = true, -- Paladin
+    ["Resurrection"]     = true, -- Priest
+    ["Ancestral Spirit"] = true, -- Shaman
+}
+
+local function _IsResurrectionSpell(spellName)
+    if not spellName then return false end
+    return _ResurrectionSpellByName[spellName] == true
+end
+
+-- These are NOT yards, they are xp3's normalized melee meter.
+_G.DoiteConditions_MeleeRangeByRace = _G.DoiteConditions_MeleeRangeByRace or {
+    -- Small hitbox races
+    GNOME      = 0.20,
+    GOBLIN     = 0.20,
+
+    -- "Normal" body size races
+    HUMAN      = 0.23,
+    ORC        = 0.23,
+    TROLL      = 0.23,
+    DWARF      = 0.23,
+    NIGHTELF   = 0.23,
+    BLOODELF   = 0.23,
+    SCOURGE    = 0.23,
+
+    -- Big bois
+    TAUREN     = 0.30,
+}
+
+_G.DoiteConditions_MeleeRangeDefault = _G.DoiteConditions_MeleeRangeDefault or 0.23
+
+local _playerMeleeThreshold = nil
+
+local function _GetPlayerMeleeThreshold()
+    if _playerMeleeThreshold then
+        return _playerMeleeThreshold
+    end
+
+    local byRace = _G.DoiteConditions_MeleeRangeByRace or {}
+
+    local raceName, raceFile
+    if UnitRace then
+        raceName, raceFile = UnitRace("player")
+    end
+
+    local key = nil
+    if raceFile and raceFile ~= "" then
+        -- Stable, non-localized token: "Goblin","Tauren","NightElf","Scourge", etc.
+        key = string.upper(raceFile)
+    elseif raceName and raceName ~= "" then
+        -- Fallback: strip spaces and upper-case
+        key = string.upper(string.gsub(raceName, "%s+", ""))
+    end
+
+    local thr = _G.DoiteConditions_MeleeRangeDefault or 0.23
+    if key and byRace[key] then
+        thr = byRace[key]
+    end
+
+    _playerMeleeThreshold = thr
+    return thr
+end
+
+local function _RefreshPlayerMeleeThreshold()
+    _playerMeleeThreshold = nil
+    _GetPlayerMeleeThreshold()
+end
+
+-- Generic distance in yards from player to unit; optional "mode" tuning for UnitXP
+local function _GetUnitDistanceYds(unit, mode)
+    if type(UnitXP) ~= "function" or not UnitExists then
+        return nil
+    end
+    local exists = UnitExists(unit)
+    if not exists then return nil end
+
+    local ok, dist
+    if mode == "melee" then
+        ok, dist = pcall(UnitXP, "distanceBetween", "player", unit, "meleeAutoAttack")
+    elseif mode == "aoe" then
+        ok, dist = pcall(UnitXP, "distanceBetween", "player", unit, "AoE")
+    else
+        ok, dist = pcall(UnitXP, "distanceBetween", "player", unit)
+    end
+
+    if not ok or type(dist) ~= "number" or dist < 0 then
+        return nil
+    end
+    return dist
+end
+
+-- Nampower-safe IsSpellInRange wrapper; returns true/false or nil if unknown
+local function _IsSpellInRangeSafe(spellName, unit)
+    if not spellName or not unit or type(IsSpellInRange) ~= "function" then
+        return nil
+    end
+
+    local sid = nil
+    if GetSpellIdForName then
+        sid = GetSpellIdForName(spellName)
+    end
+
+    local ok, res
+    if sid and sid ~= 0 then
+        ok, res = pcall(IsSpellInRange, sid, unit)
+    else
+        ok, res = pcall(IsSpellInRange, spellName, unit)
+    end
+    if not ok then return nil end
+
+    if res == 1 then
+        return true
+    elseif res == 0 then
+        return false
+    end
+    return nil
+end
+
+-- Generic "In range" threshold (non-spell icons) in default UnitXP distance units.
+_G.DoiteConditions_GenericInRangeThreshold = _G.DoiteConditions_GenericInRangeThreshold or 1.5
+
+-- Ranged-override threshold (yards) when treating a spell as pure ranged.
+_G.DoiteConditions_RangedOverrideThresholdYds = _G.DoiteConditions_RangedOverrideThresholdYds or 30
+
+-- Main "targetDistance" eval
+local function _PassesTargetDistance(condTbl, unit, spellName)
+    if not condTbl or not unit then return true end
+
+    local val = _NormalizeTargetField(condTbl.targetDistance)
+    if not val then
+        return true
+    end
+    if not UnitExists or not UnitExists(unit) then
+        return true
+    end
+
+    local isDead    = UnitIsDead and UnitIsDead(unit) == 1
+    local isFriend  = UnitIsFriend and UnitIsFriend("player", unit)
+    local canAttack = UnitCanAttack and UnitCanAttack("player", unit)
+    local isHostile = canAttack and (not isFriend)
+
+    -- Positional checks first (we do not special-case dead here)
+    if val == "Behind" then
+        if type(UnitXP) == "function" then
+            local ok, behind = pcall(UnitXP, "behind", "player", unit)
+            if ok then
+                return (behind == true)
+            end
+        end
+        -- If we can't query, don't kill the icon.
+        return true
+
+    elseif val == "In front" then
+        if type(UnitXP) == "function" then
+            local okB, behind  = pcall(UnitXP, "behind",  "player", unit)
+            local okS, inSight = pcall(UnitXP, "inSight", "player", unit)
+            if not okB then behind  = false end
+            if not okS then inSight = true  end
+            return (not behind) and (inSight ~= false)
+        end
+        return true
+    end
+
+    ----------------------------------------------------------------
+    -- Dead-target guard for range-based checks
+    --
+    -- When targeting a *dead* unit we treat all "distance check" modes
+    -- as NOT passing, so the condition returns false, except for the
+    -- explicit resurrection spells on friendly targets where we still
+    -- want a normal IsSpellInRange check.
+    ----------------------------------------------------------------
+    if val == "In range" or val == "Not in range" or val == "Melee range" then
+        if isDead then
+            local allowRes = false
+            if spellName and isFriend and (not isHostile) then
+                if _IsResurrectionSpell(spellName) then
+                    allowRes = true
+                end
+            end
+
+            -- Harmful dead or friendly dead with non-res spell:
+            -- distance condition should simply NOT pass.
+            if not allowRes then
+                return false
+            end
+        end
+    end
+
+    ----------------------------------------------------------------
+    -- Range-based checks ("In range", "Not in range", "Melee range")
+    ----------------------------------------------------------------
+    local inRange = nil
+    local overrideMode = nil
+
+    if spellName then
+        overrideMode = _GetSpellRangeOverrideMode(spellName)
+    end
+
+    -- Prefer IsSpellInRange when we know which spell this icon represents
+    -- and it is NOT in the "broken spell" override list.
+    if spellName and overrideMode == nil then
+        inRange = _IsSpellInRangeSafe(spellName, unit)
+    end
+
+    -- Fallback when IsSpellInRange isn't usable:
+    --  - For spell-bound icons: treat as melee or ranged according to override,
+    --    or default to melee-range via UnitXP("meleeAutoAttack").
+    --  - For generic icons (items/auras): use a simple generic distance threshold.
+    if inRange == nil then
+        if spellName then
+            if overrideMode == "melee" then
+                -- Broken spell flagged as melee: trust UnitXP melee distance.
+                local dist = _GetUnitDistanceYds(unit, "melee") or _GetUnitDistanceYds(unit, nil)
+                if not dist then
+                    inRange = true
+                else
+                    local thr = _GetPlayerMeleeThreshold()
+                    inRange = (dist <= thr)
+                end
+
+            elseif overrideMode == "range" then
+                -- Broken spell flagged as ranged: use a fixed yard threshold.
+                local dist = _GetUnitDistanceYds(unit, nil)
+                if not dist then
+                    inRange = true
+                else
+                    local thr = _G.DoiteConditions_RangedOverrideThresholdYds or 30
+                    inRange = (dist <= thr)
+                end
+
+            else
+                -- No override: assume "melee-ish" ability when we can't do a proper range check.
+                local dist = _GetUnitDistanceYds(unit, "melee") or _GetUnitDistanceYds(unit, nil)
+                if not dist then
+                    -- No distance info at all: don't kill the icon.
+                    inRange = true
+                else
+                    local thr = _GetPlayerMeleeThreshold()
+                    inRange = (dist <= thr)
+                end
+            end
+        else
+            -- Generic "In range" (e.g. items/auras) – tuneable threshold in xp3 units.
+            local dist = _GetUnitDistanceYds(unit, nil)
+            if not dist then
+                inRange = true
+            else
+                local generic = _G.DoiteConditions_GenericInRangeThreshold or 1.5
+                inRange = (dist <= generic)
+            end
+        end
+    end
+
+    if val == "In range" then
+        return inRange
+
+    elseif val == "Not in range" then
+        return not inRange
+
+    elseif val == "Melee range" then
+        -- We already blocked dead targets above; this is only for living units.
+        local dist = _GetUnitDistanceYds(unit, "melee") or _GetUnitDistanceYds(unit, nil)
+        if not dist then
+            return true
+        end
+        local thr = _GetPlayerMeleeThreshold()
+        return (dist <= thr)
+    end
+
+    return true
+end
+
+-- Parse "Multi: 1+2+3" → { "Humanoid","Beast","Dragonkin" }
+local function _ParseMultiUnitTypes(val)
+    local wanted, seen = {}, {}
+    local d
+    for d in string.gmatch(val, "(%d)") do
+        local idx = tonumber(d)
+        local name = idx and UNIT_TYPE_INDEX_MAP[idx] or nil
+        if name and not seen[name] then
+            table.insert(wanted, name)
+            seen[name] = true
+        end
+    end
+    return wanted
+end
+
+-- Main "targetUnitType" eval
+local function _PassesTargetUnitType(condTbl, unit)
+    if not condTbl or not unit then return true end
+
+    local val = _NormalizeTargetField(condTbl.targetUnitType)
+    if not val then
+        return true
+    end
+    if not UnitExists or not UnitExists(unit) then
+        return true
+    end
+
+    if val == "Players" then
+        if UnitIsPlayer and UnitIsPlayer(unit) then
+            return true
+        end
+        return false
+    elseif val == "NPC" then
+        if UnitIsPlayer and UnitIsPlayer(unit) then
+            return false
+        end
+        return true
+    end
+
+    local creatureType = UnitCreatureType and UnitCreatureType(unit) or nil
+    if not creatureType or creatureType == "" then
+        -- No type info; don't kill the icon
+        return true
+    end
+
+    -- Single type "1. Humanoid"
+    local num, label = string.match(val, "^(%d+)%s*%.%s*(.+)$")
+    if num and label and label ~= "" then
+        return (creatureType == label)
+    end
+
+    -- Multi: "Multi: 1+2+3"
+    if string.find(val, "Multi:") then
+        local wanted = _ParseMultiUnitTypes(val)
+        if table.getn(wanted) == 0 then
+            return true
+        end
+        local i
+        for i = 1, table.getn(wanted) do
+            if creatureType == wanted[i] then
+                return true
+            end
+        end
+        return false
+    end
+
+    -- Fallback: allow exact string match if someone typed the raw type
+    if creatureType == val then
+        return true
+    end
+
+    -- Default: don't fail on unknown label
+    return true
+end
+
+-- Optional external hook for cluster detection: function DoiteConditions_FindNearestNPCAroundTarget(unit) -> distanceYds or nil
+local function _GetNearestNpcDistanceFromUnit(unit)
+    local cb = _G.DoiteConditions_FindNearestNPCAroundTarget
+    if type(cb) == "function" then
+        local ok, dist = pcall(cb, unit)
+        if ok and type(dist) == "number" and dist >= 0 then
+            return dist
+        end
+    end
+    return nil
+end
+
+-- Optional AoE thresholds derived from spell DBC (if you want it)
+local function _GetAoeThresholdForSpell(spellName, kind)
+    if not spellName or not GetSpellIdForName or not GetSpellRecField then
+        return nil
+    end
+    local sid = GetSpellIdForName(spellName)
+    if not sid or sid <= 0 then return nil end
+
+    -- Using "rangeMax" as a rough radius proxy (yards*10)
+    local raw = GetSpellRecField(sid, "rangeMax")
+    if not raw or raw <= 0 then return nil end
+
+    local maxYds = raw / 10
+
+    if kind == "single" then
+        return math.min(maxYds * 0.4, maxYds)
+    elseif kind == "range" then
+        return math.min(maxYds * 0.5, maxYds)
+    elseif kind == "melee" then
+        return math.min(maxYds * 0.3, maxYds)
+    end
+    return nil
+end
+
+-- Main "targetSingleAOE" eval. Semantics:
+--   "Single target" -> no other NPCs within close radius
+--   "AOE (Range)"   -> at least one NPC within ~10 yards (or AoE-based)
+--   "AOE (Melee)"   -> at least one NPC within ~5 yards (or AoE-based)
+local function _PassesTargetSingleAOE(condTbl, unit, spellName)
+    if not condTbl or not unit then return true end
+
+    local val = _NormalizeTargetField(condTbl.targetSingleAOE)
+    if not val then
+        return true
+    end
+    if not UnitExists or not UnitExists(unit) then
+        return true
+    end
+
+    -- Dead-target guard:
+    -- For dead units (friendly or hostile) we always treat Single/AOE as false.
+    -- This stops corpse targets from ever satisfying these cluster conditions.
+    if UnitIsDead and UnitIsDead(unit) == 1 then
+        return false
+    end
+
+    local nearest = _GetNearestNpcDistanceFromUnit(unit)
+    if not nearest then
+        -- No neighbor info: do not fail the icon.
+        return true
+    end
+
+    local singleClose = _G.DoiteConditions_SingleCloseThresholdYds or 8
+    local aoeRange    = _G.DoiteConditions_AoeRangeThresholdYds    or 10
+    local aoeMelee    = _G.DoiteConditions_AoeMeleeThresholdYds    or 0.2
+
+    -- If you have DBC AoE info and want dynamic thresholds, plug it in here.
+    local tSingle = _GetAoeThresholdForSpell(spellName, "single")
+    if tSingle then singleClose = tSingle end
+
+    local tRange = _GetAoeThresholdForSpell(spellName, "range")
+    if tRange then aoeRange = tRange end
+
+    local tMelee = _GetAoeThresholdForSpell(spellName, "melee")
+    if tMelee then aoeMelee = tMelee end
+
+    if val == "Single target" then
+        -- Require "no other NPC is close"
+        return nearest > singleClose
+
+    elseif val == "AOE (Range)" then
+        -- Require at least one neighbor within range-AoE radius
+        return nearest <= aoeRange
+
+    elseif val == "AOE (Melee)" then
+        -- Require at least one neighbor within melee-AoE radius
+        return nearest <= aoeMelee
+    end
+
+    return true
+end
+
 -- Time remaining formatter for overlay text:
 --  >= 3600s -> "#h"
 --  >=   60s -> "#m"
 --  <    10s -> "#.#s" (tenths)
---  else      "#s"
 local function _FmtRem(remSec)
     if not remSec or remSec <= 0 then return nil end
     if remSec >= 3600 then
@@ -2217,6 +2768,78 @@ local function _RebuildAuraUsageFlags()
     end
 end
 
+-- Global flags: do we have ANY icons that use targetDistance / targetSingleAOE / targetUnitType?
+_hasAnyTargetMods_Ability = false   -- abilities + items
+_hasAnyTargetMods_Aura    = false   -- buff/debuff icons
+
+local function _IconHasTargetMods_AbilityOrItem(data)
+    if not data or not data.conditions then return false end
+    local c = data.conditions.ability or data.conditions.item
+    if not c then return false end
+
+    local td = _NormalizeTargetField(c.targetDistance)
+    local ts = _NormalizeTargetField(c.targetSingleAOE)
+    local tu = _NormalizeTargetField(c.targetUnitType)
+
+    return (td ~= nil) or (ts ~= nil) or (tu ~= nil)
+end
+
+local function _IconHasTargetMods_Aura(data)
+    if not data or not data.conditions or not data.conditions.aura then
+        return false
+    end
+    local c = data.conditions.aura
+
+    local td = _NormalizeTargetField(c.targetDistance)
+    local ts = _NormalizeTargetField(c.targetSingleAOE)
+    local tu = _NormalizeTargetField(c.targetUnitType)
+
+    return (td ~= nil) or (ts ~= nil) or (tu ~= nil)
+end
+
+local function _RebuildTargetModsFlags()
+    _hasAnyTargetMods_Ability = false
+    _hasAnyTargetMods_Aura    = false
+
+    -- 1) Live icons
+    if DoiteAurasDB and DoiteAurasDB.spells then
+        for key, data in pairs(DoiteAurasDB.spells) do
+            if type(data) == "table" and data.type then
+                if (data.type == "Ability" or data.type == "Item")
+                   and _IconHasTargetMods_AbilityOrItem(data) then
+                    _hasAnyTargetMods_Ability = true
+                end
+                if (data.type == "Buff" or data.type == "Debuff")
+                   and _IconHasTargetMods_Aura(data) then
+                    _hasAnyTargetMods_Aura = true
+                end
+                if _hasAnyTargetMods_Ability and _hasAnyTargetMods_Aura then
+                    return
+                end
+            end
+        end
+    end
+
+    -- 2) Editor-only icons
+    if DoiteDB and DoiteDB.icons then
+        for key, data in pairs(DoiteDB.icons) do
+            if type(data) == "table" and data.type then
+                if (data.type == "Ability" or data.type == "Item")
+                   and _IconHasTargetMods_AbilityOrItem(data) then
+                    _hasAnyTargetMods_Ability = true
+                end
+                if (data.type == "Buff" or data.type == "Debuff")
+                   and _IconHasTargetMods_Aura(data) then
+                    _hasAnyTargetMods_Aura = true
+                end
+                if _hasAnyTargetMods_Ability and _hasAnyTargetMods_Aura then
+                    return
+                end
+            end
+        end
+    end
+end
+
 ---------------------------------------------------------------
 -- Ability condition evaluation
 ---------------------------------------------------------------
@@ -2341,32 +2964,55 @@ local function CheckAbilityConditions(data)
         if outCombatFlag and InCombat() then show = false end
     end
 
-	-- If nothing selected, do NOT gate on target at all.
-	local ok = true
-	if allowHelp or allowHarm or allowSelf then
-		ok = false
+    -- If nothing selected, do NOT gate on target at all.
+    local ok = true
+    if allowHelp or allowHarm or allowSelf then
+        ok = false
 
-		-- Self: must be explicitly targeting player
-		if allowSelf and UnitExists("target") and UnitIsUnit("player","target") then
-			ok = true
-		end
+        -- Self: must be explicitly targeting player
+        if allowSelf and UnitExists("target") and UnitIsUnit("player","target") then
+            ok = true
+        end
 
-		-- Help: friendly target (EXCLUDING self), requires a target
-		if (not ok) and allowHelp and UnitExists("target")
-		   and UnitIsFriend("player","target")
-		   and (not UnitIsUnit("player","target")) then
-			ok = true
-		end
+        -- Help: friendly target (EXCLUDING self), requires a target
+        if (not ok) and allowHelp and UnitExists("target")
+           and UnitIsFriend("player","target")
+           and (not UnitIsUnit("player","target")) then
+            ok = true
+        end
 
-		-- Harm: hostile/attackable and not friendly, requires a target
-		if (not ok) and allowHarm and UnitExists("target")
-		   and UnitCanAttack("player","target")
-		   and (not UnitIsFriend("player","target")) then
-			ok = true
-		end
-	end
+        -- Harm: hostile/attackable and not friendly, requires a target
+        if (not ok) and allowHarm and UnitExists("target")
+           and UnitCanAttack("player","target")
+           and (not UnitIsFriend("player","target")) then
+            ok = true
+        end
+    end
 
-	if not ok then show = false end
+    if not ok then
+        show = false
+    end
+
+    -- === Target Distance / AoE / UnitType (ability) ======================
+    if show and (c.targetDistance or c.targetSingleAOE or c.targetUnitType) then
+        local unitForTarget = nil
+
+        -- If we have a target and either explicit flags or no flags at all,
+        -- treat "target" as the reference unit for these checks.
+        if UnitExists("target") then
+            unitForTarget = "target"
+        end
+
+        if unitForTarget then
+            if not _PassesTargetDistance(c, unitForTarget, spellName) then
+                show = false
+            elseif not _PassesTargetUnitType(c, unitForTarget) then
+                show = false
+            elseif not _PassesTargetSingleAOE(c, unitForTarget, spellName) then
+                show = false
+            end
+        end
+    end
 
     -- === 4. Form / Stance requirement (if set)
     if show and c.form and c.form ~= "All" then
@@ -2559,6 +3205,29 @@ local function CheckItemConditions(data)
 
         if not ok then
             show = false
+        end
+    end
+	
+	-- --------------------------------------------------------------------
+    -- 3b. Target Distance / AoE / UnitType (items)
+    -- --------------------------------------------------------------------
+    if show and (c.targetDistance or c.targetSingleAOE or c.targetUnitType) then
+        local unitForTarget = nil
+
+        -- Same idea as abilities: if we have a target, use it as the reference
+        -- for distance / cluster / unit-type checks.
+        if UnitExists("target") then
+            unitForTarget = "target"
+        end
+
+        if unitForTarget then
+            if not _PassesTargetDistance(c, unitForTarget, nil) then
+                show = false
+            elseif not _PassesTargetUnitType(c, unitForTarget) then
+                show = false
+            elseif not _PassesTargetSingleAOE(c, unitForTarget, nil) then
+                show = false
+            end
         end
     end
 
@@ -2999,7 +3668,7 @@ local function CheckAuraConditions(data)
     end
 
 
-    -- === Stacks (aura applications) ===
+       -- === Stacks (aura applications) ===
     if c.stacksEnabled
        and c.stacksComp and c.stacksComp ~= ""
        and c.stacksVal  ~= nil and c.stacksVal  ~= ""
@@ -3041,6 +3710,30 @@ local function CheckAuraConditions(data)
                 if cnt and (not _StacksPasses(cnt, c.stacksComp, threshold)) then
                     show = false
                 end
+            end
+        end
+    end
+
+    -- === Target Distance / AoE / UnitType (auras) =========================
+    if show and (c.targetDistance or c.targetSingleAOE or c.targetUnitType) then
+        -- For aura icons we only apply these when we're looking at a real target
+        -- (help/harm). Pure self-aura icons usually don't care about range/cluster.
+        local unitForTargetMods = nil
+        local allowHelp = (c.targetHelp == true)
+        local allowHarm = (c.targetHarm == true)
+        local allowSelf = (c.targetSelf == true)
+
+        if UnitExists("target") and (allowHelp or allowHarm) then
+            unitForTargetMods = "target"
+        end
+
+        if unitForTargetMods then
+            if not _PassesTargetDistance(c, unitForTargetMods, nil) then
+                show = false
+            elseif not _PassesTargetUnitType(c, unitForTargetMods) then
+                show = false
+            elseif not _PassesTargetSingleAOE(c, unitForTargetMods, nil) then
+                show = false
             end
         end
     end
@@ -3683,6 +4376,9 @@ function DoiteConditions_RequestEvaluate()
     if _RebuildAuraUsageFlags then
         _RebuildAuraUsageFlags()
     end
+    if _RebuildTargetModsFlags then
+        _RebuildTargetModsFlags()
+    end
     dirty_ability, dirty_aura, dirty_target, dirty_power = true, true, true, true
 end
 
@@ -3879,6 +4575,7 @@ local _tick = CreateFrame("Frame")
 -- Keep these as globals so the OnUpdate script doesn't capture them as upvalues
 _acc        = 0
 _textAccum  = 0
+_distAccum  = 0
 
 -- Lift the body into a real function
 local function DoiteConditions_OnUpdate(dt)
@@ -3894,6 +4591,22 @@ local function DoiteConditions_OnUpdate(dt)
 
         if _hasAnyAbilityTimeLogic or _hasAnyAuraTimeLogic then
             DoiteConditions_UpdateTimeText()
+        end
+    end
+	
+	-- Lightweight distance heartbeat: keep "In range" / "Melee range" /
+    _distAccum = _distAccum + dt
+    if _distAccum >= 0.15 then
+        _distAccum = 0
+
+        if UnitExists and UnitExists("target") then
+            -- Only mark dirty if configs actually use these options
+            if _hasAnyTargetMods_Ability then
+                dirty_ability = true
+            end
+            if _hasAnyTargetMods_Aura then
+                dirty_aura = true
+            end
         end
     end
 
@@ -3966,10 +4679,11 @@ eventFrame:SetScript("OnEvent", function()
         end
         dirty_ability, dirty_aura, dirty_target, dirty_power = true, true, true, true
 
-        -- Cache player class for lightweight warrior-specific logic
+        -- Cache player class for lightweight warrior-specific logic + range overrides
         local _, cls = UnitClass("player")
         cls = cls and string.upper(cls) or ""
-        _isWarrior = (cls == "WARRIOR")
+        _isWarrior  = (cls == "WARRIOR")
+        _playerClass = cls
 
         -- Prime time-heartbeat flags
         if _RebuildAbilityTimeHeartbeatFlag then
@@ -3977,6 +4691,15 @@ eventFrame:SetScript("OnEvent", function()
         end
         if _RebuildAuraTimeHeartbeatFlag then
             _RebuildAuraTimeHeartbeatFlag()
+        end
+        if _RebuildAuraUsageFlags then
+            _RebuildAuraUsageFlags()
+        end
+        if _RebuildTargetModsFlags then
+            _RebuildTargetModsFlags()
+        end
+        if _RefreshPlayerMeleeThreshold then
+            _RefreshPlayerMeleeThreshold()
         end
 
 	elseif event == "UNIT_AURA" then

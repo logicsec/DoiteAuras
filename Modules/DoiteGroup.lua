@@ -41,7 +41,7 @@ local function GetGroupSortMode(groupName)
     return "prio"
 end
 
--- Current key being edited (published by DoiteEdit.lua)
+-- Current key being edited
 local function editingKey()
     return _G["DoiteEdit_CurrentKey"]
 end

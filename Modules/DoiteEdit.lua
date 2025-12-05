@@ -128,6 +128,7 @@ local function EnsureDBEntry(key)
         if d.conditions.ability.targetDistance == nil then d.conditions.ability.targetDistance = nil end
         if d.conditions.ability.targetSingleAOE == nil then d.conditions.ability.targetSingleAOE = nil end
         if d.conditions.ability.targetUnitType  == nil then d.conditions.ability.targetUnitType  = nil end
+		if d.conditions.ability.weaponFilter == nil then d.conditions.ability.weaponFilter = nil end
 
         -- legacy cleanup
         d.conditions.ability.target = nil
@@ -161,6 +162,7 @@ local function EnsureDBEntry(key)
         if ic.targetDistance == nil then ic.targetDistance = nil end
         if ic.targetSingleAOE == nil then ic.targetSingleAOE = nil end
         if ic.targetUnitType  == nil then ic.targetUnitType  = nil end
+		if ic.weaponFilter == nil then ic.weaponFilter = nil end
 
     else -- Buff / Debuff (treat anything not "Ability"/"Item" as an aura carrier)
         -- keep aura; remove ability/item
@@ -185,6 +187,7 @@ local function EnsureDBEntry(key)
         if d.conditions.aura.targetDistance == nil then d.conditions.aura.targetDistance = nil end
         if d.conditions.aura.targetSingleAOE == nil then d.conditions.aura.targetSingleAOE = nil end
         if d.conditions.aura.targetUnitType  == nil then d.conditions.aura.targetUnitType  = nil end
+		if d.conditions.aura.weaponFilter == nil then d.conditions.aura.weaponFilter = nil end
 
         -- legacy cleanup
         d.conditions.aura.target       = nil
@@ -237,7 +240,6 @@ local function _DA_GetParentDims()
     return w, h
 end
 
--- compute ranges:
 --  X/Y are offsets from CENTER, so bounds are roughly +/- half the parent size (with a tiny padding)
 --  Size max scales with the smaller screen dimension so big resolutions can use larger icons.
 local function _DA_ComputePosSizeRanges()
@@ -543,6 +545,113 @@ local function InitFormDropdown(dd, data, condType)
     dd._initializedForType = condType
 end
 
+-- Unified Weapon/Fighting-style dropdown (class-specific: Warrior / Paladin / Shaman)
+local function InitWeaponDropdown(dd, data, condType)
+    if not dd then return end
+    condType = condType or "ability"
+
+    local thisKey = currentKey
+    if not thisKey then
+        ClearDropdown(dd)
+        return
+    end
+
+    -- Detect player class
+    local _, class = UnitClass("player")
+    class = class and string.upper(class) or ""
+
+    -- Options by class
+    local choices
+    if class == "WARRIOR" then
+        choices = { "Any", "Two-Hand", "Shield", "Dual-Wield" }
+    elseif class == "PALADIN" or class == "SHAMAN" then
+        choices = { "Any", "Two-Hand", "Shield" }
+    else
+        -- Not supported: just hide the dropdown
+        dd:Hide()
+        return
+    end
+
+    ClearDropdown(dd)
+
+    UIDropDownMenu_Initialize(dd, function(frame, level, menuList)
+        for _, val in ipairs(choices) do
+            local info = UIDropDownMenu_CreateInfo()
+            info.text  = val
+            info.value = val
+            local pickedVal = val
+
+            info.func = function(button)
+                local picked = (button and button.value) or pickedVal
+                if not currentKey then return end
+
+                -- Update widget
+                UIDropDownMenu_SetSelectedValue(dd, picked)
+                UIDropDownMenu_SetText(picked, dd)
+                _GoldifyDD(dd)
+
+                -- Persist into the correct conditions table
+                local d = EnsureDBEntry(currentKey)
+                d.conditions = d.conditions or {}
+
+                if condType == "ability" then
+                    d.conditions.ability = d.conditions.ability or {}
+                    d.conditions.ability.weaponFilter = picked
+                elseif condType == "aura" then
+                    d.conditions.aura = d.conditions.aura or {}
+                    d.conditions.aura.weaponFilter = picked
+                elseif condType == "item" then
+                    d.conditions.item = d.conditions.item or {}
+                    d.conditions.item.weaponFilter = picked
+                end
+
+                SafeRefresh(); SafeEvaluate()
+                if UpdateCondFrameForKey then
+                    UpdateCondFrameForKey(currentKey)
+                end
+                if CloseDropDownMenus then
+                    CloseDropDownMenus()
+                end
+            end
+
+            local saved
+            if data and data.conditions and data.conditions[condType] then
+                saved = data.conditions[condType].weaponFilter
+            end
+            info.checked = (saved == val)
+
+            UIDropDownMenu_AddButton(info)
+        end
+    end)
+
+    -- Initial visible state: saved value, or neutral "Equipped" placeholder
+    local saved
+    if data and data.conditions and data.conditions[condType] then
+        saved = data.conditions[condType].weaponFilter
+    end
+
+    if saved then
+        if UIDropDownMenu_SetSelectedValue then
+            pcall(UIDropDownMenu_SetSelectedValue, dd, saved)
+        end
+        if UIDropDownMenu_SetText then
+            pcall(UIDropDownMenu_SetText, saved, dd)
+        end
+        _GoldifyDD(dd)
+    else
+        if UIDropDownMenu_SetSelectedValue then
+            pcall(UIDropDownMenu_SetSelectedValue, dd, nil)
+        end
+        if UIDropDownMenu_SetText then
+            -- "Equipped" = default/neutral state
+            pcall(UIDropDownMenu_SetText, "Equipped", dd)
+        end
+        _GoldifyDD(dd)
+    end
+
+    dd._initializedForKey  = thisKey
+    dd._initializedForType = condType
+end
 
 ----------------------------------------------------------------
 -- Exclusive helper functions
@@ -611,7 +720,7 @@ local function SetExclusiveAuraFoundMode(mode)
 end
 
 -- File-scope helper so both CreateConditionsUI and UpdateConditionsUI can call it
-local function _GoldifyDD(dd)
+function _GoldifyDD(dd)
     if not dd or not dd.GetName then return end
     local name = dd:GetName()
     if not name then return end
@@ -619,14 +728,14 @@ local function _GoldifyDD(dd)
     if txt and txt.SetTextColor then txt:SetTextColor(1, 0.82, 0) end
 end
 
-local function _GreyifyDD(dd)
+function _GreyifyDD(dd)
     if not dd or not dd.GetName then return end
     local name = dd:GetName()
     local txt = _G[name .. "Text"]
     if txt and txt.SetTextColor then txt:SetTextColor(0.6, 0.6, 0.6) end
 end
 
-local function _WhiteifyDDText(dd)
+function _WhiteifyDDText(dd)
     if not dd or not dd.GetName then return end
     local name = dd:GetName()
     if not name then return end
@@ -923,85 +1032,99 @@ local function CreateConditionsUI()
     condFrame.cond_ability_target_harm = MakeCheck("DoiteCond_Ability_TargetHarm", "Target (harm)", 95, row3_y)
     condFrame.cond_ability_target_self = MakeCheck("DoiteCond_Ability_TargetSelf", "Target (self)", 200, row3_y)
 	SetSeparator("ability", 3, "TARGET CONDITIONS", true, true)
+	
+	-- TARGET STATUS
+    condFrame.cond_ability_target_alive = MakeCheck("DoiteCond_Ability_TargetAlive", "Alive", 0, row4_y)
+    condFrame.cond_ability_target_dead  = MakeCheck("DoiteCond_Ability_TargetDead",  "Dead",  70, row4_y)
+	SetSeparator("ability", 4, "TARGET STATUS", true, true)
 
-    condFrame.cond_ability_glow = MakeCheck("DoiteCond_Ability_Glow", "Glow", 0, row4_y)
-    condFrame.cond_ability_greyscale = MakeCheck("DoiteCond_Ability_Greyscale", "Grey", 70, row4_y)
-    condFrame.cond_ability_slider_glow = MakeCheck("DoiteCond_Ability_SliderGlow", "CD Glow", 140, row4_y)
-    condFrame.cond_ability_slider_grey = MakeCheck("DoiteCond_Ability_SliderGrey", "CD Grey", 220, row4_y)
-    SetSeparator("ability", 4, "VISUAL EFFECTS", true, true)
+    condFrame.cond_ability_glow = MakeCheck("DoiteCond_Ability_Glow", "Glow", 0, row5_y)
+    condFrame.cond_ability_greyscale = MakeCheck("DoiteCond_Ability_Greyscale", "Grey", 70, row5_y)
+    condFrame.cond_ability_slider_glow = MakeCheck("DoiteCond_Ability_SliderGlow", "CD Glow", 140, row5_y)
+    condFrame.cond_ability_slider_grey = MakeCheck("DoiteCond_Ability_SliderGrey", "CD Grey", 220, row5_y)
+    SetSeparator("ability", 5, "VISUAL EFFECTS", true, true)
 
-    -- ABILITY ROW: TARGET DISTANCE & TYPE (row 5, srow 5)
-    SetSeparator("ability", 5, "TARGET DISTANCE & TYPE", true, true)
+    -- ABILITY ROW: TARGET DISTANCE & TYPE
+    SetSeparator("ability", 6, "TARGET DISTANCE & TYPE", true, true)
 
     condFrame.cond_ability_distanceDD = CreateFrame("Frame", "DoiteCond_Ability_DistanceDD", _Parent(), "UIDropDownMenuTemplate")
-    condFrame.cond_ability_distanceDD:SetPoint("TOPLEFT", _Parent(), "TOPLEFT", -15, row5_y+3)
+    condFrame.cond_ability_distanceDD:SetPoint("TOPLEFT", _Parent(), "TOPLEFT", -15, row6_y+3)
     if UIDropDownMenu_SetWidth then pcall(UIDropDownMenu_SetWidth, 75, condFrame.cond_ability_distanceDD) end
 
     condFrame.cond_ability_singleAoeDD = CreateFrame("Frame", "DoiteCond_Ability_SingleAOEDD", _Parent(), "UIDropDownMenuTemplate")
-    condFrame.cond_ability_singleAoeDD:SetPoint("TOPLEFT", _Parent(), "TOPLEFT", 75, row5_y+3)
+    condFrame.cond_ability_singleAoeDD:SetPoint("TOPLEFT", _Parent(), "TOPLEFT", 85, row6_y+3)
     if UIDropDownMenu_SetWidth then pcall(UIDropDownMenu_SetWidth, 75, condFrame.cond_ability_singleAoeDD) end
 
     condFrame.cond_ability_unitTypeDD = CreateFrame("Frame", "DoiteCond_Ability_UnitTypeDD", _Parent(), "UIDropDownMenuTemplate")
-    condFrame.cond_ability_unitTypeDD:SetPoint("TOPLEFT", _Parent(), "TOPLEFT", 165, row5_y+3)
+    condFrame.cond_ability_unitTypeDD:SetPoint("TOPLEFT", _Parent(), "TOPLEFT", 185, row6_y+3)
     if UIDropDownMenu_SetWidth then pcall(UIDropDownMenu_SetWidth, 75, condFrame.cond_ability_unitTypeDD) end
 
-    -- Now everything below moves down one row index:
-    condFrame.cond_ability_slider = MakeCheck("DoiteCond_Ability_Slider", "Soon off CD indicator", 0, row6_y)
+    condFrame.cond_ability_slider = MakeCheck("DoiteCond_Ability_Slider", "Soon off CD indicator", 0, row7_y)
     condFrame.cond_ability_slider_dir = CreateFrame("Frame", "DoiteCond_Ability_SliderDir", _Parent(), "UIDropDownMenuTemplate")
     condFrame.cond_ability_slider_dir:SetPoint("LEFT", condFrame.cond_ability_slider, "RIGHT", 110, -3)
     if UIDropDownMenu_SetWidth then pcall(UIDropDownMenu_SetWidth, 60, condFrame.cond_ability_slider_dir) end
-    condFrame.cond_ability_remaining_cb   = MakeCheck("DoiteCond_Ability_RemainingCB", "Remaining", 0, row6_y)
-    condFrame.cond_ability_remaining_comp = MakeComparatorDD("DoiteCond_Ability_RemComp", 65, row6_y+3, 50)
-    condFrame.cond_ability_remaining_val  = MakeSmallEdit("DoiteCond_Ability_RemVal", 160, row6_y-2, 40)
+    condFrame.cond_ability_remaining_cb   = MakeCheck("DoiteCond_Ability_RemainingCB", "Remaining", 0, row7_y)
+    condFrame.cond_ability_remaining_comp = MakeComparatorDD("DoiteCond_Ability_RemComp", 65, row7_y+3, 50)
+    condFrame.cond_ability_remaining_val  = MakeSmallEdit("DoiteCond_Ability_RemVal", 160, row7_y-2, 40)
     condFrame.cond_ability_remaining_val_enter = _Parent():CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     condFrame.cond_ability_remaining_val_enter:SetPoint("LEFT", condFrame.cond_ability_remaining_val, "RIGHT", 4, 0)
     condFrame.cond_ability_remaining_val_enter:SetText("(sec.)")
     condFrame.cond_ability_remaining_val_enter:Hide()
-    SetSeparator("ability", 6, "REMAINING TIME", true, true)
+    SetSeparator("ability", 7, "REMAINING TIME", true, true)
 
-    condFrame.cond_ability_power = MakeCheck("DoiteCond_Ability_PowerCB", "Power", 0, row7_y)
-    condFrame.cond_ability_power_comp = MakeComparatorDD("DoiteCond_Ability_PowerComp", 65, row7_y+3, 50)
-    condFrame.cond_ability_power_val  = MakeSmallEdit("DoiteCond_Ability_PowerVal", 160, row7_y-2, 40)
+    condFrame.cond_ability_power = MakeCheck("DoiteCond_Ability_PowerCB", "Power", 0, row8_y)
+    condFrame.cond_ability_power_comp = MakeComparatorDD("DoiteCond_Ability_PowerComp", 65, row8_y+3, 50)
+    condFrame.cond_ability_power_val  = MakeSmallEdit("DoiteCond_Ability_PowerVal", 160, row8_y-2, 40)
     condFrame.cond_ability_power_val_enter = _Parent():CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     condFrame.cond_ability_power_val_enter:SetPoint("LEFT", condFrame.cond_ability_power_val, "RIGHT", 4, 0)
     condFrame.cond_ability_power_val_enter:SetText("(%)")
     condFrame.cond_ability_power_val_enter:Hide()
-    SetSeparator("ability", 7, "RESOURCE", true, true)
+    SetSeparator("ability", 8, "RESOURCE", true, true)
 
-    condFrame.cond_ability_hp_my   = MakeCheck("DoiteCond_Ability_HP_My", "My HP", 0, row8_y)
-    condFrame.cond_ability_hp_tgt  = MakeCheck("DoiteCond_Ability_HP_Tgt", "Target HP", 65, row8_y)
-    condFrame.cond_ability_hp_comp = MakeComparatorDD("DoiteCond_Ability_HP_Comp", 130, row8_y+3, 50)
-    condFrame.cond_ability_hp_val  = MakeSmallEdit("DoiteCond_Ability_HP_Val", 225, row8_y-2, 40)
+    condFrame.cond_ability_hp_my   = MakeCheck("DoiteCond_Ability_HP_My", "My HP", 0, row9_y)
+    condFrame.cond_ability_hp_tgt  = MakeCheck("DoiteCond_Ability_HP_Tgt", "Target HP", 65, row9_y)
+    condFrame.cond_ability_hp_comp = MakeComparatorDD("DoiteCond_Ability_HP_Comp", 130, row9_y+3, 50)
+    condFrame.cond_ability_hp_val  = MakeSmallEdit("DoiteCond_Ability_HP_Val", 225, row9_y-2, 40)
     condFrame.cond_ability_hp_val_enter = _Parent():CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     condFrame.cond_ability_hp_val_enter:SetPoint("LEFT", condFrame.cond_ability_hp_val, "RIGHT", 4, 0)
     condFrame.cond_ability_hp_val_enter:SetText("(%)")
     condFrame.cond_ability_hp_comp:Hide()
     condFrame.cond_ability_hp_val:Hide()
     condFrame.cond_ability_hp_val_enter:Hide()
-    SetSeparator("ability", 8, "HEALTH CONDITION", true, true)
+    SetSeparator("ability", 9, "HEALTH CONDITION", true, true)
 
-    condFrame.cond_ability_text_time = MakeCheck("DoiteCond_Ability_TextTime", "Text: Time remaining", 0, row9_y)
-    SetSeparator("ability", 9, "ICON TEXT", true, true)
+    condFrame.cond_ability_text_time = MakeCheck("DoiteCond_Ability_TextTime", "Text: Time remaining", 0, row10_y)
+    SetSeparator("ability", 10, "ICON TEXT", true, true)
 
-    condFrame.cond_ability_cp_cb   = MakeCheck("DoiteCond_Ability_CP_CB", "Combo points", 0, row10_y)
-    condFrame.cond_ability_cp_comp = MakeComparatorDD("DoiteCond_Ability_CP_Comp", 85, row10_y+3, 50)
-    condFrame.cond_ability_cp_val  = MakeSmallEdit("DoiteCond_Ability_CP_Val", 180, row10_y-2, 40)
+	-- Combo points dropdown (class-specific: druid / rogue)
+    condFrame.cond_ability_cp_cb   = MakeCheck("DoiteCond_Ability_CP_CB", "Combo points", 0, row11_y)
+    condFrame.cond_ability_cp_comp = MakeComparatorDD("DoiteCond_Ability_CP_Comp", 85, row11_y+3, 50)
+    condFrame.cond_ability_cp_val  = MakeSmallEdit("DoiteCond_Ability_CP_Val", 180, row11_y-2, 40)
     condFrame.cond_ability_cp_val_enter = _Parent():CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     condFrame.cond_ability_cp_val_enter:SetPoint("LEFT", condFrame.cond_ability_cp_val, "RIGHT", 4, 0)
     condFrame.cond_ability_cp_val_enter:SetText("(#)")
     condFrame.cond_ability_cp_val_enter:Hide()
-    SetSeparator("ability", 10, "CLASS-SPECIFIC", true, true)
+    SetSeparator("ability", 11, "CLASS-SPECIFIC", true, true)
+
+    -- Ability: class-specific weapon / fighting-style dropdown (Shaman / Warrior / Paladin)
+    condFrame.cond_ability_weaponDD = CreateFrame("Frame", "DoiteCond_Ability_WeaponDD", _Parent(), "UIDropDownMenuTemplate")
+    condFrame.cond_ability_weaponDD:SetPoint("TOPLEFT", _Parent(), "TOPLEFT", -15, row11_y+3)
+    if UIDropDownMenu_SetWidth then
+        pcall(UIDropDownMenu_SetWidth, 90, condFrame.cond_ability_weaponDD)
+    end
+    condFrame.cond_ability_weaponDD:Hide()
+    ClearDropdown(condFrame.cond_ability_weaponDD)
 
     -- Ability: class-specific note for classes without combo points
     condFrame.cond_ability_class_note = _Parent():CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    condFrame.cond_ability_class_note:SetPoint("TOPLEFT", _Parent(), "TOPLEFT", 0, row10_y)
+    condFrame.cond_ability_class_note:SetPoint("TOPLEFT", _Parent(), "TOPLEFT", 0, row11_y)
     condFrame.cond_ability_class_note:SetTextColor(1, 0.82, 0)
     condFrame.cond_ability_class_note:SetText("No class-specific option added for your class.")
     condFrame.cond_ability_class_note:Hide()
 	
 	-- Ability: dynamic Aura Conditions section
-    local abilityAuraBaseY = row11_y
-    SetSeparator("ability", 11, "ABILITY, BUFF & DEBUFF CONDITIONS", true, true)
+    local abilityAuraBaseY = row12_y
+    SetSeparator("ability", 12, "ABILITY, BUFF & DEBUFF CONDITIONS", true, true)
     condFrame.abilityAuraAnchor = CreateFrame("Frame", nil, _Parent())
     condFrame.abilityAuraAnchor:SetPoint("TOPLEFT",  _Parent(), "TOPLEFT",  0, abilityAuraBaseY)
     condFrame.abilityAuraAnchor:SetPoint("TOPRIGHT", _Parent(), "TOPRIGHT", 0, abilityAuraBaseY)
@@ -1027,82 +1150,87 @@ local function CreateConditionsUI()
 	condFrame.cond_aura_target_harm = MakeCheck("DoiteCond_Aura_TargetHarm", "Target (harm)", 94, row3_y)
 	condFrame.cond_aura_onself      = MakeCheck("DoiteCond_Aura_OnSelf", "On player (self)", 192, row3_y)
 	SetSeparator("aura", 3, "TARGET CONDITIONS", true, true)
+	
+	-- TARGET STATUS
+    condFrame.cond_aura_target_alive = MakeCheck("DoiteCond_Aura_TargetAlive", "Alive", 0, row4_y)
+    condFrame.cond_aura_target_dead  = MakeCheck("DoiteCond_Aura_TargetDead",  "Dead",  70, row4_y)
+	SetSeparator("aura", 4, "TARGET STATUS", true, true)
 
-    condFrame.cond_aura_glow = MakeCheck("DoiteCond_Aura_Glow", "Glow", 0, row4_y)
-    condFrame.cond_aura_greyscale = MakeCheck("DoiteCond_Aura_Greyscale", "Grey", 70, row4_y)	
-    SetSeparator("aura", 4, "VISUAL EFFECTS", true, true)
+    condFrame.cond_aura_glow = MakeCheck("DoiteCond_Aura_Glow", "Glow", 0, row5_y)
+    condFrame.cond_aura_greyscale = MakeCheck("DoiteCond_Aura_Greyscale", "Grey", 70, row5_y)	
+    SetSeparator("aura", 5, "VISUAL EFFECTS", true, true)
 
-    -- AURA ROW: TARGET DISTANCE & TYPE (row 5, srow 5)
-    SetSeparator("aura", 5, "TARGET DISTANCE & TYPE", true, true)
+    -- AURA ROW: TARGET DISTANCE & TYPE
+    SetSeparator("aura", 6, "TARGET DISTANCE & TYPE", true, true)
 
     condFrame.cond_aura_distanceDD = CreateFrame("Frame", "DoiteCond_Aura_DistanceDD", _Parent(), "UIDropDownMenuTemplate")
-    condFrame.cond_aura_distanceDD:SetPoint("TOPLEFT", _Parent(), "TOPLEFT", -15, row5_y+3)
+    condFrame.cond_aura_distanceDD:SetPoint("TOPLEFT", _Parent(), "TOPLEFT", -15, row6_y+3)
     if UIDropDownMenu_SetWidth then pcall(UIDropDownMenu_SetWidth, 75, condFrame.cond_aura_distanceDD) end
 
     condFrame.cond_aura_singleAoeDD = CreateFrame("Frame", "DoiteCond_Aura_SingleAOEDD", _Parent(), "UIDropDownMenuTemplate")
-    condFrame.cond_aura_singleAoeDD:SetPoint("TOPLEFT", _Parent(), "TOPLEFT", 75, row5_y+3)
+    condFrame.cond_aura_singleAoeDD:SetPoint("TOPLEFT", _Parent(), "TOPLEFT", 85, row6_y+3)
     if UIDropDownMenu_SetWidth then pcall(UIDropDownMenu_SetWidth, 75, condFrame.cond_aura_singleAoeDD) end
 
     condFrame.cond_aura_unitTypeDD = CreateFrame("Frame", "DoiteCond_Aura_UnitTypeDD", _Parent(), "UIDropDownMenuTemplate")
-    condFrame.cond_aura_unitTypeDD:SetPoint("TOPLEFT", _Parent(), "TOPLEFT", 165, row5_y+3)
+    condFrame.cond_aura_unitTypeDD:SetPoint("TOPLEFT", _Parent(), "TOPLEFT", 185, row6_y+3)
     if UIDropDownMenu_SetWidth then pcall(UIDropDownMenu_SetWidth, 75, condFrame.cond_aura_unitTypeDD) end
 
-    condFrame.cond_aura_power = MakeCheck("DoiteCond_Aura_PowerCB", "Power", 0, row6_y)
-    condFrame.cond_aura_power_comp = MakeComparatorDD("DoiteCond_Aura_PowerComp", 65, row6_y+3, 50)
-    condFrame.cond_aura_power_val  = MakeSmallEdit("DoiteCond_Aura_PowerVal", 160, row6_y-2, 40)
+    condFrame.cond_aura_power = MakeCheck("DoiteCond_Aura_PowerCB", "Power", 0, row7_y)
+    condFrame.cond_aura_power_comp = MakeComparatorDD("DoiteCond_Aura_PowerComp", 65, row7_y+3, 50)
+    condFrame.cond_aura_power_val  = MakeSmallEdit("DoiteCond_Aura_PowerVal", 160, row7_y-2, 40)
     condFrame.cond_aura_power_val_enter = _Parent():CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     condFrame.cond_aura_power_val_enter:SetPoint("LEFT", condFrame.cond_aura_power_val, "RIGHT", 4, 0)
     condFrame.cond_aura_power_val_enter:SetText("(%)")
     condFrame.cond_aura_power_comp:Hide()
     condFrame.cond_aura_power_val:Hide()
     condFrame.cond_aura_power_val_enter:Hide()
-    SetSeparator("aura", 6, "RESOURCE", true, true)
+    SetSeparator("aura", 7, "RESOURCE", true, true)
 	
-    condFrame.cond_aura_hp_my   = MakeCheck("DoiteCond_Aura_HP_My", "My HP", 0, row7_y)
-    condFrame.cond_aura_hp_tgt  = MakeCheck("DoiteCond_Aura_HP_Tgt", "Target HP", 65, row7_y)
-    condFrame.cond_aura_hp_comp = MakeComparatorDD("DoiteCond_Aura_HP_Comp", 130, row7_y+3, 50)
-    condFrame.cond_aura_hp_val  = MakeSmallEdit("DoiteCond_Aura_HP_Val", 225, row7_y-2, 40)
+    condFrame.cond_aura_hp_my   = MakeCheck("DoiteCond_Aura_HP_My", "My HP", 0, row8_y)
+    condFrame.cond_aura_hp_tgt  = MakeCheck("DoiteCond_Aura_HP_Tgt", "Target HP", 65, row8_y)
+    condFrame.cond_aura_hp_comp = MakeComparatorDD("DoiteCond_Aura_HP_Comp", 130, row8_y+3, 50)
+    condFrame.cond_aura_hp_val  = MakeSmallEdit("DoiteCond_Aura_HP_Val", 225, row8_y-2, 40)
     condFrame.cond_aura_hp_val_enter = _Parent():CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     condFrame.cond_aura_hp_val_enter:SetPoint("LEFT", condFrame.cond_aura_hp_val, "RIGHT", 4, 0)
     condFrame.cond_aura_hp_val_enter:SetText("(%)")
     condFrame.cond_aura_hp_comp:Hide()
     condFrame.cond_aura_hp_val:Hide()
     condFrame.cond_aura_hp_val_enter:Hide()	
-    SetSeparator("aura", 7, "HEALTH CONDITION", true, true)
+    SetSeparator("aura", 8, "HEALTH CONDITION", true, true)
 
     -- Row 8: Aura owner (moved down from row7)
-    condFrame.cond_aura_mine = MakeCheck("DoiteCond_Aura_MyAura", "My Aura", 0, row8_y)
+    condFrame.cond_aura_mine = MakeCheck("DoiteCond_Aura_MyAura", "My Aura", 0, row9_y)
     condFrame.cond_aura_owner_tip = _Parent():CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     condFrame.cond_aura_owner_tip:SetPoint("LEFT", condFrame.cond_aura_mine.text, "RIGHT", 4, 0)
     condFrame.cond_aura_owner_tip:SetText("(Req. Cursive addon)")
     condFrame.cond_aura_owner_tip:SetTextColor(0.6, 0.6, 0.6)
     condFrame.cond_aura_owner_tip:Hide()
-    SetSeparator("aura", 8, "AURA OWNER", true, true)
+    SetSeparator("aura", 9, "AURA OWNER", true, true)
 	
-	-- Row 9-10: Time remaining & stacks
-	condFrame.cond_aura_remaining_cb   = MakeCheck("DoiteCond_Aura_RemCB", "Remaining", 0, row9_y)
-    condFrame.cond_aura_remaining_comp = MakeComparatorDD("DoiteCond_Aura_RemComp", 65, row9_y+3, 50)
-    condFrame.cond_aura_remaining_val  = MakeSmallEdit("DoiteCond_Aura_RemVal", 160, row9_y-2, 40)
+	-- Time remaining & stacks
+	condFrame.cond_aura_remaining_cb   = MakeCheck("DoiteCond_Aura_RemCB", "Remaining", 0, row10_y)
+    condFrame.cond_aura_remaining_comp = MakeComparatorDD("DoiteCond_Aura_RemComp", 65, row10_y+3, 50)
+    condFrame.cond_aura_remaining_val  = MakeSmallEdit("DoiteCond_Aura_RemVal", 160, row10_y-2, 40)
     condFrame.cond_aura_remaining_val_enter = _Parent():CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     condFrame.cond_aura_remaining_val_enter:SetPoint("LEFT", condFrame.cond_aura_remaining_val, "RIGHT", 4, 0)
     condFrame.cond_aura_remaining_val_enter:SetText("(sec.)")
     condFrame.cond_aura_remaining_val_enter:Hide()
 
-	condFrame.cond_aura_stacks_cb   = MakeCheck("DoiteCond_Aura_StacksCB", "Stacks", 0, srow10_y)
-    condFrame.cond_aura_stacks_comp = MakeComparatorDD("DoiteCond_Aura_StacksComp", 65, srow10_y+3, 50)
-    condFrame.cond_aura_stacks_val  = MakeSmallEdit("DoiteCond_Aura_StacksVal", 160, srow10_y-2, 40)
+	condFrame.cond_aura_stacks_cb   = MakeCheck("DoiteCond_Aura_StacksCB", "Stacks", 0, srow11_y)
+    condFrame.cond_aura_stacks_comp = MakeComparatorDD("DoiteCond_Aura_StacksComp", 65, srow11_y+3, 50)
+    condFrame.cond_aura_stacks_val  = MakeSmallEdit("DoiteCond_Aura_StacksVal", 160, srow11_y-2, 40)
     condFrame.cond_aura_stacks_val_enter = _Parent():CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     condFrame.cond_aura_stacks_val_enter:SetPoint("LEFT", condFrame.cond_aura_stacks_val, "RIGHT", 4, 0)
     condFrame.cond_aura_stacks_val_enter:SetText("(#)")
     condFrame.cond_aura_stacks_val_enter:Hide()
 
-    condFrame.cond_aura_text_time  = MakeCheck("DoiteCond_Aura_TextTime",  "Text: Time remaining",  0,   row10_y-10)
-    condFrame.cond_aura_text_stack = MakeCheck("DoiteCond_Aura_TextStack", "Text: Stack counter", 150,   row10_y-10)
-	SetSeparator("aura", 9, "TIME REMAINING & STACKS", true, true)
+    condFrame.cond_aura_text_time  = MakeCheck("DoiteCond_Aura_TextTime",  "Text: Time remaining",  0,   row11_y-11)
+    condFrame.cond_aura_text_stack = MakeCheck("DoiteCond_Aura_TextStack", "Text: Stack counter", 150,   row11_y-11)
+	SetSeparator("aura", 10, "TIME REMAINING & STACKS", true, true)
 	
-    -- Row 11: Class-specific (combo points)
+    -- Class-specific (combo points)
 
-    local auraClassRowY = row11_y - 10
+    local auraClassRowY = row12_y - 10
 
     condFrame.cond_aura_cp_cb   = MakeCheck("DoiteCond_Aura_CP_CB", "Combo points", 0, auraClassRowY)
     condFrame.cond_aura_cp_comp = MakeComparatorDD("DoiteCond_Aura_CP_Comp", 85, auraClassRowY+3, 50)
@@ -1112,14 +1240,22 @@ local function CreateConditionsUI()
     condFrame.cond_aura_cp_val_enter:SetText("(#)")
     condFrame.cond_aura_cp_val_enter:Hide()
 
-    -- separator for row 11, shifted down by -10 as well
-    local sepAuraClass = SetSeparator("aura", 11, "CLASS-SPECIFIC", true, true)
+    local sepAuraClass = SetSeparator("aura", 12, "CLASS-SPECIFIC", true, true)
     if sepAuraClass and srows then
-        local newY = (srows[11] or 0) - 10  -- original slot-10 Y minus 10
+        local newY = (srows[12] or 0) - 10  -- original slot-10 Y minus 10
         sepAuraClass:ClearAllPoints()
         sepAuraClass:SetPoint("TOPLEFT",  _Parent(), "TOPLEFT",  0, newY)
         sepAuraClass:SetPoint("TOPRIGHT", _Parent(), "TOPRIGHT", 0, newY)
     end
+
+    -- Aura: class-specific weapon / fighting-style dropdown (Shaman / Warrior / Paladin)
+    condFrame.cond_aura_weaponDD = CreateFrame("Frame", "DoiteCond_Aura_WeaponDD", _Parent(), "UIDropDownMenuTemplate")
+    condFrame.cond_aura_weaponDD:SetPoint("TOPLEFT", _Parent(), "TOPLEFT", -15, auraClassRowY+3)
+    if UIDropDownMenu_SetWidth then
+        pcall(UIDropDownMenu_SetWidth, 90, condFrame.cond_aura_weaponDD)
+    end
+    condFrame.cond_aura_weaponDD:Hide()
+    ClearDropdown(condFrame.cond_aura_weaponDD)	
 
     -- Aura: class-specific note for classes without combo points
     condFrame.cond_aura_class_note = _Parent():CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -1128,17 +1264,16 @@ local function CreateConditionsUI()
     condFrame.cond_aura_class_note:SetText("No class-specific option added for your class.")
     condFrame.cond_aura_class_note:Hide()
 	
-	-- separator for row 12, shifted down by -10 as well
-    local sepAuraBuff = SetSeparator("aura", 12, "ABILITY, BUFF & DEBUFF CONDITIONS", true, true)
+    local sepAuraBuff = SetSeparator("aura", 13, "ABILITY, BUFF & DEBUFF CONDITIONS", true, true)
     if sepAuraBuff and srows then
-        local newY = (srows[12] or 0) - 10
+        local newY = (srows[13] or 0) - 10
         sepAuraBuff:ClearAllPoints()
         sepAuraBuff:SetPoint("TOPLEFT",  _Parent(), "TOPLEFT",  0, newY)
         sepAuraBuff:SetPoint("TOPRIGHT", _Parent(), "TOPRIGHT", 0, newY)
     end
 	
 	-- Aura (Buff/Debuff): dynamic Aura Conditions section
-    local auraAuraBaseY = row12_y - 10
+    local auraAuraBaseY = row13_y - 10
     condFrame.auraAuraAnchor = CreateFrame("Frame", nil, _Parent())
     condFrame.auraAuraAnchor:SetPoint("TOPLEFT",  _Parent(), "TOPLEFT",  0, auraAuraBaseY)
     condFrame.auraAuraAnchor:SetPoint("TOPRIGHT", _Parent(), "TOPRIGHT", 0, auraAuraBaseY)
@@ -1147,7 +1282,7 @@ local function CreateConditionsUI()
     --------------------------------------------------
     -- Item rows
     --------------------------------------------------
-    -- Row 1: WHEREABOUTS / INVENTORY SLOT (special items)
+    -- WHEREABOUTS / INVENTORY SLOT (special items)
     condFrame.cond_item_where_equipped = MakeCheck("DoiteCond_Item_WhereEquipped", "Equipped", 0, row1_y)
     condFrame.cond_item_where_bag      = MakeCheck("DoiteCond_Item_WhereBag",      "In backpack", 90, row1_y)
     condFrame.cond_item_where_missing  = MakeCheck("DoiteCond_Item_WhereMissing",  "Missing", 190, row1_y)
@@ -1165,100 +1300,114 @@ local function CreateConditionsUI()
     -- Default title; changed dynamically in UpdateConditionsUI for special items
     SetSeparator("item", 1, "WHEREABOUTS", true, true)
 
-    -- Row 2: USABILITY & COOLDOWN (no "Usable")
+    -- USABILITY & COOLDOWN (no "Usable")
     condFrame.cond_item_notcd = MakeCheck("DoiteCond_Item_NotCD", "Not on cooldown", 0, row2_y)
     condFrame.cond_item_oncd  = MakeCheck("DoiteCond_Item_OnCD",  "On cooldown",     150, row2_y)
     SetSeparator("item", 2, "USABILITY & COOLDOWN", true, true)
 
-    -- Row 3: COMBAT STATE
+    -- COMBAT STATE
     condFrame.cond_item_incombat  = MakeCheck("DoiteCond_Item_InCombat",  "In combat",      0, row3_y)
     condFrame.cond_item_outcombat = MakeCheck("DoiteCond_Item_OutCombat", "Out of combat", 80, row3_y)
     SetSeparator("item", 3, "COMBAT STATE", true, true)
 
-    -- Row 4: TARGET CONDITIONS
+    -- TARGET CONDITIONS
     condFrame.cond_item_target_help = MakeCheck("DoiteCond_Item_TargetHelp", "Target (help)", 0, row4_y)
     condFrame.cond_item_target_harm = MakeCheck("DoiteCond_Item_TargetHarm", "Target (harm)", 95, row4_y)
     condFrame.cond_item_target_self = MakeCheck("DoiteCond_Item_TargetSelf", "Target (self)", 200, row4_y)
     SetSeparator("item", 4, "TARGET CONDITIONS", true, true)
+	
+	-- TARGET STATUS (Item) – use row5_y so it sits near Visual Effects row for items
+    condFrame.cond_item_target_alive = MakeCheck("DoiteCond_Item_TargetAlive", "Alive", 0, row5_y)
+    condFrame.cond_item_target_dead  = MakeCheck("DoiteCond_Item_TargetDead",  "Dead",  70, row5_y)
+	SetSeparator("item", 5, "TARGET STATUS", true, true)
 
-    -- Row 5: VISUAL EFFECTS
-    condFrame.cond_item_glow       = MakeCheck("DoiteCond_Item_Glow",      "Glow", 0,  row5_y)
-    condFrame.cond_item_greyscale  = MakeCheck("DoiteCond_Item_Greyscale", "Grey", 70, row5_y)
-    condFrame.cond_item_text_time  = MakeCheck("DoiteCond_Item_TextTime",  "Text: Remaining time", 140, row5_y)
-    SetSeparator("item", 5, "VISUAL EFFECTS", true, true)
+    -- VISUAL EFFECTS
+    condFrame.cond_item_glow       = MakeCheck("DoiteCond_Item_Glow",      "Glow", 0,  row6_y)
+    condFrame.cond_item_greyscale  = MakeCheck("DoiteCond_Item_Greyscale", "Grey", 70, row6_y)
+    condFrame.cond_item_text_time  = MakeCheck("DoiteCond_Item_TextTime",  "Text: Remaining time", 140, row6_y)
+    SetSeparator("item", 6, "VISUAL EFFECTS", true, true)
 
-    -- ITEM ROW: TARGET DISTANCE & TYPE (row 6, srow 6)
-    SetSeparator("item", 6, "TARGET DISTANCE & TYPE", true, true)
+    -- ITEM ROW: TARGET DISTANCE & TYPE
+    SetSeparator("item", 7, "TARGET DISTANCE & TYPE", true, true)
 
     condFrame.cond_item_distanceDD = CreateFrame("Frame", "DoiteCond_Item_DistanceDD", _Parent(), "UIDropDownMenuTemplate")
-    condFrame.cond_item_distanceDD:SetPoint("TOPLEFT", _Parent(), "TOPLEFT", -15, row6_y+3)
+    condFrame.cond_item_distanceDD:SetPoint("TOPLEFT", _Parent(), "TOPLEFT", -15, row7_y+3)
     if UIDropDownMenu_SetWidth then pcall(UIDropDownMenu_SetWidth, 75, condFrame.cond_item_distanceDD) end
 
     condFrame.cond_item_singleAoeDD = CreateFrame("Frame", "DoiteCond_Item_SingleAOEDD", _Parent(), "UIDropDownMenuTemplate")
-    condFrame.cond_item_singleAoeDD:SetPoint("TOPLEFT", _Parent(), "TOPLEFT", 75, row6_y+3)
+    condFrame.cond_item_singleAoeDD:SetPoint("TOPLEFT", _Parent(), "TOPLEFT", 85, row7_y+3)
     if UIDropDownMenu_SetWidth then pcall(UIDropDownMenu_SetWidth, 75, condFrame.cond_item_singleAoeDD) end
 
     condFrame.cond_item_unitTypeDD = CreateFrame("Frame", "DoiteCond_Item_UnitTypeDD", _Parent(), "UIDropDownMenuTemplate")
-    condFrame.cond_item_unitTypeDD:SetPoint("TOPLEFT", _Parent(), "TOPLEFT", 165, row6_y+3)
+    condFrame.cond_item_unitTypeDD:SetPoint("TOPLEFT", _Parent(), "TOPLEFT", 185, row7_y+3)
     if UIDropDownMenu_SetWidth then pcall(UIDropDownMenu_SetWidth, 75, condFrame.cond_item_unitTypeDD) end
 
-    -- Row 7: RESOURCE (Power)
-    condFrame.cond_item_power      = MakeCheck("DoiteCond_Item_PowerCB", "Power", 0, row7_y)
-    condFrame.cond_item_power_comp = MakeComparatorDD("DoiteCond_Item_PowerComp", 65, row7_y+3, 50)
-    condFrame.cond_item_power_val  = MakeSmallEdit("DoiteCond_Item_PowerVal", 160, row7_y-2, 40)
+    -- RESOURCE (Power)
+    condFrame.cond_item_power      = MakeCheck("DoiteCond_Item_PowerCB", "Power", 0, row8_y)
+    condFrame.cond_item_power_comp = MakeComparatorDD("DoiteCond_Item_PowerComp", 65, row8_y+3, 50)
+    condFrame.cond_item_power_val  = MakeSmallEdit("DoiteCond_Item_PowerVal", 160, row8_y-2, 40)
     condFrame.cond_item_power_val_enter = _Parent():CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     condFrame.cond_item_power_val_enter:SetPoint("LEFT", condFrame.cond_item_power_val, "RIGHT", 4, 0)
     condFrame.cond_item_power_val_enter:SetText("(%)")
     condFrame.cond_item_power_comp:Hide()
     condFrame.cond_item_power_val:Hide()
     condFrame.cond_item_power_val_enter:Hide()
-    SetSeparator("item", 7, "RESOURCE", true, true)
+    SetSeparator("item", 8, "RESOURCE", true, true)
 
-    -- Row 8: HEALTH CONDITION
-    condFrame.cond_item_hp_my   = MakeCheck("DoiteCond_Item_HP_My",  "My HP",     0, row8_y)
-    condFrame.cond_item_hp_tgt  = MakeCheck("DoiteCond_Item_HP_Tgt", "Target HP", 65, row8_y)
-    condFrame.cond_item_hp_comp = MakeComparatorDD("DoiteCond_Item_HP_Comp", 130, row8_y+3, 50)
-    condFrame.cond_item_hp_val  = MakeSmallEdit("DoiteCond_Item_HP_Val", 225, row8_y-2, 40)
+    -- HEALTH CONDITION
+    condFrame.cond_item_hp_my   = MakeCheck("DoiteCond_Item_HP_My",  "My HP",     0, row9_y)
+    condFrame.cond_item_hp_tgt  = MakeCheck("DoiteCond_Item_HP_Tgt", "Target HP", 65, row9_y)
+    condFrame.cond_item_hp_comp = MakeComparatorDD("DoiteCond_Item_HP_Comp", 130, row9_y+3, 50)
+    condFrame.cond_item_hp_val  = MakeSmallEdit("DoiteCond_Item_HP_Val", 225, row9_y-2, 40)
     condFrame.cond_item_hp_val_enter = _Parent():CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     condFrame.cond_item_hp_val_enter:SetPoint("LEFT", condFrame.cond_item_hp_val, "RIGHT", 4, 0)
     condFrame.cond_item_hp_val_enter:SetText("(%)")
     condFrame.cond_item_hp_comp:Hide()
     condFrame.cond_item_hp_val:Hide()
     condFrame.cond_item_hp_val_enter:Hide()
-    SetSeparator("item", 8, "HEALTH CONDITION", true, true)
+    SetSeparator("item", 9, "HEALTH CONDITION", true, true)
 
-    -- Row 9: REMAINING TIME (no slider)
-    condFrame.cond_item_remaining_cb   = MakeCheck("DoiteCond_Item_RemCB", "Remaining", 0, row9_y)
-    condFrame.cond_item_remaining_comp = MakeComparatorDD("DoiteCond_Item_RemComp", 80, row9_y+3, 50)
-    condFrame.cond_item_remaining_val  = MakeSmallEdit("DoiteCond_Item_RemVal", 175, row9_y-2, 40)
+    -- REMAINING TIME (no slider)
+    condFrame.cond_item_remaining_cb   = MakeCheck("DoiteCond_Item_RemCB", "Remaining", 0, row10_y)
+    condFrame.cond_item_remaining_comp = MakeComparatorDD("DoiteCond_Item_RemComp", 80, row10_y+3, 50)
+    condFrame.cond_item_remaining_val  = MakeSmallEdit("DoiteCond_Item_RemVal", 175, row10_y-2, 40)
     condFrame.cond_item_remaining_val_enter = _Parent():CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     condFrame.cond_item_remaining_val_enter:SetPoint("LEFT", condFrame.cond_item_remaining_val, "RIGHT", 4, 0)
     condFrame.cond_item_remaining_val_enter:SetText("(sec.)")
     condFrame.cond_item_remaining_comp:Hide()
     condFrame.cond_item_remaining_val:Hide()
     condFrame.cond_item_remaining_val_enter:Hide()
-    SetSeparator("item", 9, "REMAINING TIME", true, true)
+    SetSeparator("item", 10, "REMAINING TIME", true, true)
 
-    -- Row 10: CLASS-SPECIFIC (Combo points)
-    condFrame.cond_item_cp_cb   = MakeCheck("DoiteCond_Item_CP_CB", "Combo points", 0, row10_y)
-    condFrame.cond_item_cp_comp = MakeComparatorDD("DoiteCond_Item_CP_Comp", 85, row10_y+3, 50)
-    condFrame.cond_item_cp_val  = MakeSmallEdit("DoiteCond_Item_CP_Val", 180, row10_y-2, 40)
+    -- CLASS-SPECIFIC (Combo points)
+    condFrame.cond_item_cp_cb   = MakeCheck("DoiteCond_Item_CP_CB", "Combo points", 0, row11_y)
+    condFrame.cond_item_cp_comp = MakeComparatorDD("DoiteCond_Item_CP_Comp", 85, row11_y+3, 50)
+    condFrame.cond_item_cp_val  = MakeSmallEdit("DoiteCond_Item_CP_Val", 180, row11_y-2, 40)
     condFrame.cond_item_cp_val_enter = _Parent():CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     condFrame.cond_item_cp_val_enter:SetPoint("LEFT", condFrame.cond_item_cp_val, "RIGHT", 4, 0)
     condFrame.cond_item_cp_val_enter:SetText("(#)")
     condFrame.cond_item_cp_val_enter:Hide()
-    SetSeparator("item", 10, "CLASS-SPECIFIC", true, true)
+    SetSeparator("item", 11, "CLASS-SPECIFIC", true, true)
+
+    -- Item: class-specific weapon / fighting-style dropdown (Shaman / Warrior / Paladin)
+    condFrame.cond_item_weaponDD = CreateFrame("Frame", "DoiteCond_Item_WeaponDD", _Parent(), "UIDropDownMenuTemplate")
+    condFrame.cond_item_weaponDD:SetPoint("TOPLEFT", _Parent(), "TOPLEFT", -15, row11_y+3)
+    if UIDropDownMenu_SetWidth then
+        pcall(UIDropDownMenu_SetWidth, 90, condFrame.cond_item_weaponDD)
+    end
+    condFrame.cond_item_weaponDD:Hide()
+    ClearDropdown(condFrame.cond_item_weaponDD)
 
     -- Item: class-specific note for classes without combo points
     condFrame.cond_item_class_note = _Parent():CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    condFrame.cond_item_class_note:SetPoint("TOPLEFT", _Parent(), "TOPLEFT", 0, row10_y)
+    condFrame.cond_item_class_note:SetPoint("TOPLEFT", _Parent(), "TOPLEFT", 0, row11_y)
     condFrame.cond_item_class_note:SetTextColor(1, 0.82, 0)
     condFrame.cond_item_class_note:SetText("No class-specific option added for your class.")
     condFrame.cond_item_class_note:Hide()
 	
 	-- Item: dynamic Aura Conditions section
-    local itemAuraBaseY = row11_y
-    SetSeparator("item", 11, "ABILITY, BUFF & DEBUFF CONDITIONS", true, true)
+    local itemAuraBaseY = row12_y
+    SetSeparator("item", 12, "ABILITY, BUFF & DEBUFF CONDITIONS", true, true)
     condFrame.itemAuraAnchor = CreateFrame("Frame", nil, _Parent())
     condFrame.itemAuraAnchor:SetPoint("TOPLEFT",  _Parent(), "TOPLEFT",  0, itemAuraBaseY)
     condFrame.itemAuraAnchor:SetPoint("TOPRIGHT", _Parent(), "TOPRIGHT", 0, itemAuraBaseY)
@@ -1490,7 +1639,7 @@ local function CreateConditionsUI()
     local categoryConfirmTitle, categoryConfirmDesc
     local categoryConfirmYes, categoryConfirmNo
     local categoryPendingRemoveName
-    local Category_DoRemove -- forward declaration for the worker
+    local Category_DoRemove
 
     local function Category_EnsureConfirmFrame()
         if categoryConfirmFrame then return end
@@ -1842,16 +1991,45 @@ end)
         SetCombatFlag("item", "out", this:GetChecked())
     end)
 
-	-- Ability target row (multi-select, enforce at least one)
-	local function SaveAbilityTargetsFromUI()
-		if not currentKey then return end
-		local d = EnsureDBEntry(currentKey)
-		d.conditions = d.conditions or {}
-		d.conditions.ability = d.conditions.ability or {}
-		d.conditions.ability.targetHelp = condFrame.cond_ability_target_help:GetChecked() and true or false
-		d.conditions.ability.targetHarm = condFrame.cond_ability_target_harm:GetChecked() and true or false
-		d.conditions.ability.targetSelf = condFrame.cond_ability_target_self:GetChecked() and true or false
-	end
+    -- Ability target row (multi-select) + target status row
+    local function SaveAbilityTargetsFromUI()
+        if not currentKey then return end
+        local d = EnsureDBEntry(currentKey)
+        d.conditions = d.conditions or {}
+        d.conditions.ability = d.conditions.ability or {}
+
+        local ca = d.conditions.ability
+
+        ca.targetHelp  = condFrame.cond_ability_target_help:GetChecked() and true or false
+        ca.targetHarm  = condFrame.cond_ability_target_harm:GetChecked() and true or false
+        ca.targetSelf  = condFrame.cond_ability_target_self:GetChecked() and true or false
+        ca.targetAlive = condFrame.cond_ability_target_alive:GetChecked() and true or false
+        ca.targetDead  = condFrame.cond_ability_target_dead:GetChecked()  and true or false
+    end
+
+	condFrame.cond_ability_target_alive:SetScript("OnClick", function()
+        if not currentKey then this:SetChecked(false) return end
+
+        if this:GetChecked() then
+            -- turn off Dead when Alive is ticked
+            condFrame.cond_ability_target_dead:SetChecked(false)
+        end
+
+        SaveAbilityTargetsFromUI()
+        SafeRefresh(); SafeEvaluate()
+    end)
+
+    condFrame.cond_ability_target_dead:SetScript("OnClick", function()
+        if not currentKey then this:SetChecked(false) return end
+
+        if this:GetChecked() then
+            -- turn off Alive when Dead is ticked
+            condFrame.cond_ability_target_alive:SetChecked(false)
+        end
+
+        SaveAbilityTargetsFromUI()
+        SafeRefresh(); SafeEvaluate()
+    end)
 
 	condFrame.cond_ability_target_help:SetScript("OnClick", function()
 		if not currentKey then this:SetChecked(false) return end
@@ -1883,10 +2061,33 @@ end)
         local d = EnsureDBEntry(currentKey)
         d.conditions = d.conditions or {}
         d.conditions.item = d.conditions.item or {}
-        d.conditions.item.targetHelp = condFrame.cond_item_target_help:GetChecked() and true or false
-        d.conditions.item.targetHarm = condFrame.cond_item_target_harm:GetChecked() and true or false
-        d.conditions.item.targetSelf = condFrame.cond_item_target_self:GetChecked() and true or false
+		
+		local ca = d.conditions.item
+		
+        ca.targetHelp = condFrame.cond_item_target_help:GetChecked() and true or false
+        ca.targetHarm = condFrame.cond_item_target_harm:GetChecked() and true or false
+        ca.targetSelf = condFrame.cond_item_target_self:GetChecked() and true or false
+		ca.targetAlive = condFrame.cond_item_target_alive:GetChecked() and true or false
+        ca.targetDead  = condFrame.cond_item_target_dead:GetChecked()  and true or false
     end
+
+	condFrame.cond_item_target_alive:SetScript("OnClick", function()
+        if not currentKey then this:SetChecked(false) return end
+        if this:GetChecked() then
+            condFrame.cond_item_target_dead:SetChecked(false)
+        end
+        SaveItemTargetsFromUI()
+        SafeRefresh(); SafeEvaluate()
+    end)
+
+    condFrame.cond_item_target_dead:SetScript("OnClick", function()
+        if not currentKey then this:SetChecked(false) return end
+        if this:GetChecked() then
+            condFrame.cond_item_target_alive:SetChecked(false)
+        end
+        SaveItemTargetsFromUI()
+        SafeRefresh(); SafeEvaluate()
+    end)
 
     condFrame.cond_item_target_help:SetScript("OnClick", function()
         if not currentKey then this:SetChecked(false) return end
@@ -2140,10 +2341,14 @@ end)
 		if not currentKey then return end
 		local d = EnsureDBEntry(currentKey)
 		d.conditions = d.conditions or {}
-		d.conditions.aura = d.conditions.aura or {}
-		d.conditions.aura.targetHelp = condFrame.cond_aura_target_help:GetChecked() and true or false
-		d.conditions.aura.targetHarm = condFrame.cond_aura_target_harm:GetChecked() and true or false
-		d.conditions.aura.targetSelf = condFrame.cond_aura_onself:GetChecked()      and true or false
+		
+		local ca = d.conditions.aura
+		
+		ca.targetHelp = condFrame.cond_aura_target_help:GetChecked() and true or false
+		ca.targetHarm = condFrame.cond_aura_target_harm:GetChecked() and true or false
+		ca.targetSelf = condFrame.cond_aura_onself:GetChecked()      and true or false
+		ca.targetAlive = condFrame.cond_aura_target_alive:GetChecked() and true or false
+        ca.targetDead  = condFrame.cond_aura_target_dead:GetChecked()  and true or false
 	end
 
 	local function EnforceAuraExclusivity(changedBox)
@@ -2174,6 +2379,24 @@ end)
 			if changedBox then changedBox:SetChecked(true) end
 		end
 	end
+
+	condFrame.cond_aura_target_alive:SetScript("OnClick", function()
+        if not currentKey then this:SetChecked(false) return end
+        if this:GetChecked() then
+            condFrame.cond_aura_target_dead:SetChecked(false)
+        end
+        SaveAuraTargets()
+        SafeRefresh(); SafeEvaluate()
+    end)
+
+    condFrame.cond_aura_target_dead:SetScript("OnClick", function()
+        if not currentKey then this:SetChecked(false) return end
+        if this:GetChecked() then
+            condFrame.cond_aura_target_alive:SetChecked(false)
+        end
+        SaveAuraTargets()
+        SafeRefresh(); SafeEvaluate()
+    end)
 
 	condFrame.cond_aura_target_help:SetScript("OnClick", function()
 		if not currentKey then this:SetChecked(false) return end
@@ -3139,6 +3362,7 @@ end)
     condFrame.cond_ability_slider_glow:Hide()
     condFrame.cond_ability_slider_grey:Hide()
     condFrame.cond_ability_text_time:Hide()
+	if condFrame.cond_ability_weaponDD then condFrame.cond_ability_weaponDD:Hide() end
 
     if condFrame.cond_ability_distanceDD   then condFrame.cond_ability_distanceDD:Hide()   end
     if condFrame.cond_ability_singleAoeDD  then condFrame.cond_ability_singleAoeDD:Hide()  end
@@ -3192,6 +3416,7 @@ end)
     if condFrame.cond_aura_distanceDD   then condFrame.cond_aura_distanceDD:Hide()   end
     if condFrame.cond_aura_singleAoeDD  then condFrame.cond_aura_singleAoeDD:Hide()  end
     if condFrame.cond_aura_unitTypeDD   then condFrame.cond_aura_unitTypeDD:Hide()   end
+	if condFrame.cond_aura_weaponDD then condFrame.cond_aura_weaponDD:Hide() end
 	
     condFrame.cond_item_where_equipped:Hide()
     condFrame.cond_item_where_bag:Hide()
@@ -3223,6 +3448,7 @@ end)
     condFrame.cond_item_cp_comp:Hide()
     condFrame.cond_item_cp_val:Hide()
     condFrame.cond_item_cp_val_enter:Hide()
+	if condFrame.cond_item_weaponDD then condFrame.cond_item_weaponDD:Hide() end
 	condFrame.cond_item_inv_trinket1:Hide()
     condFrame.cond_item_inv_trinket2:Hide()
     condFrame.cond_item_inv_trinket_first:Hide()
@@ -3248,6 +3474,32 @@ end)
     if condFrame.abilityAuraAnchor then condFrame.abilityAuraAnchor:Hide() end
     if condFrame.auraAuraAnchor    then condFrame.auraAuraAnchor:Hide()    end
     if condFrame.itemAuraAnchor    then condFrame.itemAuraAnchor:Hide()    end
+
+    -- Make sure the AND/OR logic popup and buttons vanish when the edit frame is closed
+    if condFrame and not condFrame._logicHideHooked then
+        condFrame._logicHideHooked = true
+        local oldOnHide = condFrame:GetScript("OnHide")
+
+        condFrame:SetScript("OnHide", function()
+            -- Close the AND/OR / () popup if it is open
+            if DoiteAuraLogicFrame and DoiteAuraLogicFrame:IsShown() then
+                DoiteAuraLogicFrame:Hide()
+            end
+
+            -- Hide all per-type logic buttons as well
+            if AuraCond_Managers then
+                for _, mgr in pairs(AuraCond_Managers) do
+                    if mgr.logicButton then
+                        mgr.logicButton:Hide()
+                    end
+                end
+            end
+
+            if oldOnHide then
+                oldOnHide()
+            end
+        end)
+    end
 end
 
 -- Dynamically resize the scroll/content area to fit the last visible row (+20px buffer)
@@ -3294,7 +3546,7 @@ local function _ReflowCondAreaHeight()
     parent:SetHeight(height)
 
     -- Make sure the scrollframe actually uses this content frame as its scroll child
-    -- Try both "_scrollFrame" and "scrollFrame" to match your actual field names.
+    -- Try both "_scrollFrame" and "scrollFrame" to match actual field names.
     local sf = condFrame._scrollFrame or condFrame.scrollFrame
     if sf then
         if sf.SetScrollChild then
@@ -3759,8 +4011,10 @@ do
         mgr.editRow:Show()
 
         -- layout: label at 0, then rows going down
+                -- layout: label at 0, then rows going down
         local y = -14
 
+        -- saved rows
         i = 1
         while mgr.savedRows and mgr.savedRows[i] do
             local row = mgr.savedRows[i]
@@ -3773,6 +4027,23 @@ do
             i = i + 1
         end
 
+        -- logic button under the last condition row (only if ≥ 2)
+        local list = AuraCond_GetListForType(typeKey) or {}
+        local count = AuraCond_Len(list)
+
+        if mgr.logicButton then
+            if count >= 2 then
+                mgr.logicButton:Show()
+                mgr.logicButton:ClearAllPoints()
+                mgr.logicButton:SetPoint("TOPLEFT",  mgr.anchor, "TOPLEFT",  0, y)
+                mgr.logicButton:SetWidth(110)
+                y = y - 20
+            else
+                mgr.logicButton:Hide()
+            end
+        end
+
+        -- editing row goes under the logic button (if any)
         if mgr.editRow and mgr.editRow:IsShown() then
             mgr.editRow:ClearAllPoints()
             mgr.editRow:SetPoint("TOPLEFT", mgr.anchor, "TOPLEFT", 0, y)
@@ -3781,7 +4052,7 @@ do
         end
 
         mgr.anchor:SetHeight(-y + 4)
-		_ReflowCondAreaHeight()
+        _ReflowCondAreaHeight()
     end
 
      local function AuraCond_OnAdd(row)
@@ -4054,28 +4325,75 @@ do
         return row
     end
 
-    AuraCond_RegisterManager = function(typeKey, anchorFrame)
-        if not anchorFrame then return end
+	AuraCond_RegisterManager = function(typeKey, anchorFrame)
+		if not anchorFrame then return end
 
-        local mgr = AuraCond_Managers[typeKey] or {}
-        mgr.typeKey = typeKey
-        mgr.anchor  = anchorFrame
-        mgr.savedRows = mgr.savedRows or {}
-        mgr.editRow   = mgr.editRow or nil
-        mgr._createRow = AuraCond_CreateRow
+		local mgr = AuraCond_Managers[typeKey]
+		if not mgr then
+			mgr = {}
+			AuraCond_Managers[typeKey] = mgr
+		end
 
-        if not mgr.label then
-            mgr.label = anchorFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-            mgr.label:SetPoint("TOPLEFT", anchorFrame, "TOPLEFT", 0, 0)
-            mgr.label:SetJustifyH("LEFT")
-            mgr.label:SetTextColor(1, 0.82, 0)
-            mgr.label:SetText("Add conditions for found or missing Auras:")
-        end
+		mgr.typeKey    = typeKey
+		mgr.anchor     = anchorFrame
+		mgr.savedRows  = mgr.savedRows or {}
+		mgr.editRow    = mgr.editRow   or nil
+		mgr._createRow = AuraCond_CreateRow
 
-        AuraCond_Managers[typeKey] = mgr
-        anchorFrame:SetHeight(20)
-        anchorFrame:Hide()
-    end
+		-- Header label for this section
+		if not mgr.label then
+			local label = anchorFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+			label:SetPoint("TOPLEFT", anchorFrame, "TOPLEFT", 0, 0)
+			label:SetJustifyH("LEFT")
+			label:SetTextColor(1, 0.82, 0)
+			label:SetText("Add conditions for found or missing Auras:")
+			mgr.label = label
+		end
+
+		-- Create the And/Or logic button once per manager
+		if not mgr.logicButton then
+			local btnName = "DoiteAuraLogicButton_" .. tostring(typeKey)
+			-- parent MUST be the same scroll-child anchor frame so it scrolls with rows
+			local btn = CreateFrame("Button", btnName, anchorFrame, "UIPanelButtonTemplate")
+			btn:SetWidth(50)
+			btn:SetHeight(18)
+			btn:SetText("And/Or Logic")
+
+			-- place it on the same top row, right side of the anchor frame
+			btn:ClearAllPoints()
+			btn:SetPoint("TOPRIGHT", anchorFrame, "TOPRIGHT", 0, 0)
+
+			-- make sure it is drawn above the scroll child contents
+			if btn.SetFrameStrata then
+				btn:SetFrameStrata("HIGH")
+			end
+			if anchorFrame.GetFrameLevel and btn.SetFrameLevel then
+				btn:SetFrameLevel(anchorFrame:GetFrameLevel() + 1)
+			end
+
+			-- yellow small text, like the other small buttons
+			local fs = btn:GetFontString()
+			if fs and fs.SetTextColor then
+				fs:SetTextColor(1, 0.82, 0)
+			end
+
+			btn:Hide()
+
+			btn:SetScript("OnClick", function()
+				local DL = _G["DoiteLogic"]
+				if DL and DL.OpenAuraLogicEditor then
+					DL.OpenAuraLogicEditor("aura")   -- or "ability"/"item"
+				end
+			end)
+
+			mgr.logicButton = btn
+		end
+
+		-- Base height: rows will extend this via AuraCond_CreateRow / refresh
+		anchorFrame:SetHeight(20)
+		anchorFrame:Hide()
+	end
+
 
     AuraCond_RefreshFromDB = function(typeKey)
         local tk, mgr
@@ -4114,6 +4432,13 @@ local function UpdateConditionsUI(data)
     DoiteEdit_AnnounceEditingIcon(dn)
 
     local c = data.conditions
+	
+	    local function _IsWarriorPaladinShaman()
+        local _, cls = UnitClass("player")
+        cls = cls and string.upper(cls) or ""
+        return (cls == "WARRIOR" or cls == "PALADIN" or cls == "SHAMAN")
+    end
+
 
     ----------------------------------------------------------------
     -- Icon-level categories (applies regardless of type)
@@ -4219,6 +4544,19 @@ local function UpdateConditionsUI(data)
 		condFrame.cond_ability_target_help:SetChecked(ah)
 		condFrame.cond_ability_target_harm:SetChecked(ar)
 		condFrame.cond_ability_target_self:SetChecked(as)
+		
+		-- TARGET STATUS (ability): mutually exclusive, but both can be off
+        local ta = (c.ability and c.ability.targetAlive) == true
+        local td = (c.ability and c.ability.targetDead)  == true
+
+        if condFrame.cond_ability_target_alive then
+            condFrame.cond_ability_target_alive:SetChecked(ta)
+            condFrame.cond_ability_target_alive:Show()
+        end
+        if condFrame.cond_ability_target_dead then
+            condFrame.cond_ability_target_dead:SetChecked(td)
+            condFrame.cond_ability_target_dead:Show()
+        end
 		
 		        -- === TARGET DISTANCE & TYPE (Ability) ===
         if condFrame.cond_ability_distanceDD then
@@ -4341,8 +4679,16 @@ local function UpdateConditionsUI(data)
             condFrame.cond_ability_remaining_cb:Hide()
         end
 
-        -- Row 7: Combo points / class-specific note
-        if _IsRogueOrDruid() then
+        -- Combo points / class-specific note / weapon filter
+        local isRogueOrDruid = _IsRogueOrDruid and _IsRogueOrDruid() or false
+        local isWPS          = _IsWarriorPaladinShaman()
+
+        if condFrame.cond_ability_weaponDD then
+            condFrame.cond_ability_weaponDD:Hide()
+        end
+
+        if isRogueOrDruid then
+            -- Original combo-point behavior (Rogue / Druid)
             condFrame.cond_ability_cp_cb:Show()
             if condFrame.cond_ability_class_note then
                 condFrame.cond_ability_class_note:Hide()
@@ -4364,7 +4710,22 @@ local function UpdateConditionsUI(data)
                 condFrame.cond_ability_cp_val:Hide()
                 condFrame.cond_ability_cp_val_enter:Hide()
             end
+
+        elseif isWPS and condFrame.cond_ability_weaponDD then
+            -- Warrior / Paladin / Shaman: use weapon / fighting-style dropdown instead of CPs
+            condFrame.cond_ability_cp_cb:Hide()
+            condFrame.cond_ability_cp_comp:Hide()
+            condFrame.cond_ability_cp_val:Hide()
+            condFrame.cond_ability_cp_val_enter:Hide()
+            if condFrame.cond_ability_class_note then
+                condFrame.cond_ability_class_note:Hide()
+            end
+
+            condFrame.cond_ability_weaponDD:Show()
+            InitWeaponDropdown(condFrame.cond_ability_weaponDD, data, "ability")
+
         else
+            -- Other classes: neither CP nor weapon-filter → show neutral note
             condFrame.cond_ability_cp_cb:Hide()
             condFrame.cond_ability_cp_comp:Hide()
             condFrame.cond_ability_cp_val:Hide()
@@ -4373,6 +4734,7 @@ local function UpdateConditionsUI(data)
                 condFrame.cond_ability_class_note:Show()
             end
         end
+
 
         -- Row 8: HP selector (mutually exclusive)
         condFrame.cond_ability_hp_my:Show()
@@ -4530,6 +4892,7 @@ local function UpdateConditionsUI(data)
 		if condFrame.cond_aura_cp_val then condFrame.cond_aura_cp_val:Hide() end
 		if condFrame.cond_aura_cp_val_enter then condFrame.cond_aura_cp_val_enter:Hide() end
 		if condFrame.cond_aura_class_note then condFrame.cond_aura_class_note:Hide() end
+		if condFrame.cond_aura_weaponDD then condFrame.cond_aura_weaponDD:Hide() end
 
         -- hide aura target distance/type row when not editing an aura
         if condFrame.cond_aura_distanceDD  then condFrame.cond_aura_distanceDD:Hide()  end
@@ -4582,6 +4945,13 @@ local function UpdateConditionsUI(data)
         if condFrame.cond_item_inv_wep_offhand then condFrame.cond_item_inv_wep_offhand:Hide() end
         if condFrame.cond_item_inv_wep_ranged then condFrame.cond_item_inv_wep_ranged:Hide() end
 		if condFrame.cond_item_class_note then condFrame.cond_item_class_note:Hide() end
+		if condFrame.cond_item_weaponDD then condFrame.cond_item_weaponDD:Hide() end
+		        -- Hide TARGET STATUS for aura & item when editing an ability
+        if condFrame.cond_aura_target_alive then condFrame.cond_aura_target_alive:Hide() end
+        if condFrame.cond_aura_target_dead  then condFrame.cond_aura_target_dead:Hide()  end
+        if condFrame.cond_item_target_alive then condFrame.cond_item_target_alive:Hide() end
+        if condFrame.cond_item_target_dead  then condFrame.cond_item_target_dead:Hide()  end
+
 
     -- ITEM
     elseif data.type == "Item" then
@@ -4737,24 +5107,25 @@ local function UpdateConditionsUI(data)
                 end
             end
 
-            _RestoreItemDD(condFrame.cond_item_distanceDD,  ic.targetDistance,   "Distance")
-            _RestoreItemDD(condFrame.cond_item_singleAoeDD, ic.targetSingleAOE,  "Single/AOE")
-            _RestoreItemDD(condFrame.cond_item_unitTypeDD,  ic.targetUnitType,   "Unit type")
+            -- Always clear & hard-disable Distance for items
+            ic.targetDistance = nil
+            _RestoreItemDD(condFrame.cond_item_distanceDD, nil, "Distance")
+            _SetDDEnabled(condFrame.cond_item_distanceDD, false, "Distance")
 
-            -- Grey out when item is "Missing" OR when Target (self) is selected
+            -- Single/AOE + UnitType still follow the old rules
+            _RestoreItemDD(condFrame.cond_item_singleAoeDD, ic.targetSingleAOE, "Single/AOE")
+            _RestoreItemDD(condFrame.cond_item_unitTypeDD,  ic.targetUnitType,  "Unit type")
+
             local isMissingForDD = (ic.whereMissing == true)
             local hasSelfTarget  = (ic.targetSelf == true)
 
             if isMissingForDD or hasSelfTarget then
-                -- clear DB fields when disabled
-                ic.targetDistance   = nil
-                ic.targetSingleAOE  = nil
-                ic.targetUnitType   = nil
-                _SetDDEnabled(condFrame.cond_item_distanceDD,  false, "Distance")
+                ic.targetSingleAOE = nil
+                ic.targetUnitType  = nil
+
                 _SetDDEnabled(condFrame.cond_item_singleAoeDD, false, "Single/AOE")
                 _SetDDEnabled(condFrame.cond_item_unitTypeDD,  false, "Unit type")
             else
-                _SetDDEnabled(condFrame.cond_item_distanceDD,  true, "Distance")
                 _SetDDEnabled(condFrame.cond_item_singleAoeDD, true, "Single/AOE")
                 _SetDDEnabled(condFrame.cond_item_unitTypeDD,  true, "Unit type")
             end
@@ -4805,6 +5176,16 @@ local function UpdateConditionsUI(data)
         condFrame.cond_item_target_help:SetChecked(ic.targetHelp == true)
         condFrame.cond_item_target_harm:SetChecked(ic.targetHarm == true)
         condFrame.cond_item_target_self:SetChecked(ic.targetSelf == true)
+		
+        -- TARGET STATUS (item)
+        if condFrame.cond_item_target_alive then
+            condFrame.cond_item_target_alive:SetChecked(ic.targetAlive == true)
+            condFrame.cond_item_target_alive:Show()
+        end
+        if condFrame.cond_item_target_dead then
+            condFrame.cond_item_target_dead:SetChecked(ic.targetDead == true)
+            condFrame.cond_item_target_dead:Show()
+        end
 
         -- VISUAL EFFECTS
         condFrame.cond_item_glow:Show()
@@ -4914,8 +5295,16 @@ local function UpdateConditionsUI(data)
             condFrame.cond_item_remaining_val_enter:Hide()
         end
 
-        -- CLASS-SPECIFIC (combo points / note)
-        if _IsRogueOrDruid() then
+        -- CLASS-SPECIFIC (combo points / note / weapon filter)
+        local isRogueOrDruid = _IsRogueOrDruid and _IsRogueOrDruid() or false
+        local isWPS          = _IsWarriorPaladinShaman()
+
+        -- Default: hide weapon dropdown; show+init only for W/P/S
+        if condFrame.cond_item_weaponDD then
+            condFrame.cond_item_weaponDD:Hide()
+        end
+
+        if isRogueOrDruid then
             condFrame.cond_item_cp_cb:Show()
             if condFrame.cond_item_class_note then
                 condFrame.cond_item_class_note:Hide()
@@ -4948,7 +5337,22 @@ local function UpdateConditionsUI(data)
                     condFrame.cond_item_cp_val_enter:Hide()
                 end
             end
+
+        elseif isWPS and condFrame.cond_item_weaponDD then
+            -- Warrior / Paladin / Shaman: weapon / fighting-style dropdown instead of CP
+            condFrame.cond_item_cp_cb:Hide()
+            condFrame.cond_item_cp_comp:Hide()
+            condFrame.cond_item_cp_val:Hide()
+            condFrame.cond_item_cp_val_enter:Hide()
+            if condFrame.cond_item_class_note then
+                condFrame.cond_item_class_note:Hide()
+            end
+
+            condFrame.cond_item_weaponDD:Show()
+            InitWeaponDropdown(condFrame.cond_item_weaponDD, data, "item")
+
         else
+            -- Other classes: no CP and no weapon filter → show neutral note
             condFrame.cond_item_cp_cb:Hide()
             condFrame.cond_item_cp_comp:Hide()
             condFrame.cond_item_cp_val:Hide()
@@ -5020,6 +5424,9 @@ local function UpdateConditionsUI(data)
         condFrame.cond_ability_cp_val_enter:Hide()
 		if condFrame.cond_ability_class_note then condFrame.cond_ability_class_note:Hide() end
         if condFrame.cond_ability_formDD then condFrame.cond_ability_formDD:Hide() end
+		if condFrame.cond_ability_weaponDD then condFrame.cond_ability_weaponDD:Hide() end
+		if condFrame.cond_ability_target_alive then condFrame.cond_ability_target_alive:Hide() end
+        if condFrame.cond_ability_target_dead  then condFrame.cond_ability_target_dead:Hide()  end
 
         -- hide aura controls
         condFrame.cond_aura_found:Hide()
@@ -5029,6 +5436,8 @@ local function UpdateConditionsUI(data)
         condFrame.cond_aura_target_help:Hide()
         condFrame.cond_aura_target_harm:Hide()
         condFrame.cond_aura_onself:Hide()
+		if condFrame.cond_aura_target_alive then condFrame.cond_aura_target_alive:Hide() end
+        if condFrame.cond_aura_target_dead  then condFrame.cond_aura_target_dead:Hide()  end
         condFrame.cond_aura_glow:Hide()
         condFrame.cond_aura_greyscale:Hide()
         condFrame.cond_aura_power:Hide()
@@ -5054,6 +5463,7 @@ local function UpdateConditionsUI(data)
         condFrame.cond_aura_cp_comp:Hide()
         condFrame.cond_aura_cp_val:Hide()
 		condFrame.cond_aura_cp_val_enter:Hide()
+		if condFrame.cond_aura_weaponDD then condFrame.cond_aura_weaponDD:Hide() end
 
         -- hide aura target distance/type row when not editing an aura
         if condFrame.cond_aura_distanceDD  then condFrame.cond_aura_distanceDD:Hide()  end
@@ -5136,6 +5546,14 @@ local function UpdateConditionsUI(data)
         local th = (c.aura and c.aura.targetHelp) and true or false
         local tm = (c.aura and c.aura.targetHarm) and true or false
         local ts = (c.aura and c.aura.targetSelf) and true or false
+		
+        -- TARGET STATUS
+        local taa = (c.aura and c.aura.targetAlive) == true
+        local tad = (c.aura and c.aura.targetDead)  == true
+        condFrame.cond_aura_target_alive:SetChecked(taa)
+        condFrame.cond_aura_target_dead:SetChecked(tad)
+		if condFrame.cond_aura_target_alive then condFrame.cond_aura_target_alive:Show() end
+        if condFrame.cond_aura_target_dead  then condFrame.cond_aura_target_dead:Show()  end
 
         -- Normalize: Self is exclusive vs Help/Harm
         if ts then th, tm = false, false end
@@ -5159,7 +5577,7 @@ local function UpdateConditionsUI(data)
         condFrame.cond_aura_target_harm:SetChecked(tm)
         condFrame.cond_aura_onself:SetChecked(ts)
 
-		        -- === TARGET DISTANCE & TYPE (Aura) ===
+        -- === TARGET DISTANCE & TYPE (Aura) ===
         if condFrame.cond_aura_distanceDD then
             condFrame.cond_aura_distanceDD:Show()
             condFrame.cond_aura_singleAoeDD:Show()
@@ -5188,22 +5606,26 @@ local function UpdateConditionsUI(data)
                 end
             end
 
-            _RestoreAuraDD(condFrame.cond_aura_distanceDD,   a.targetDistance,   "Distance")
-            _RestoreAuraDD(condFrame.cond_aura_singleAoeDD,  a.targetSingleAOE,  "Single/AOE")
-            _RestoreAuraDD(condFrame.cond_aura_unitTypeDD,   a.targetUnitType,   "Unit type")
+            -- Always clear & hard-disable Distance for auras
+            if a then a.targetDistance = nil end
+            _RestoreAuraDD(condFrame.cond_aura_distanceDD, nil, "Distance")
+            _SetDDEnabled(condFrame.cond_aura_distanceDD, false, "Distance")
 
-            local onSelf = (a.targetSelf == true)
-            if onSelf then
-                a.targetDistance   = nil
+            -- Single/AOE + UnitType remain usable
+            _RestoreAuraDD(condFrame.cond_aura_singleAoeDD, a.targetSingleAOE, "Single/AOE")
+            _RestoreAuraDD(condFrame.cond_aura_unitTypeDD,  a.targetUnitType,  "Unit type")
+
+            -- Self-only target: Single/AOE / UnitType are meaningless
+            local isSelfOnly = (a.targetSelf == true)
+            if isSelfOnly then
                 a.targetSingleAOE  = nil
                 a.targetUnitType   = nil
-                _SetDDEnabled(condFrame.cond_aura_distanceDD,   false, "Distance")
-                _SetDDEnabled(condFrame.cond_aura_singleAoeDD,  false, "Single/AOE")
-                _SetDDEnabled(condFrame.cond_aura_unitTypeDD,   false, "Unit type")
+
+                _SetDDEnabled(condFrame.cond_aura_singleAoeDD, false, "Single/AOE")
+                _SetDDEnabled(condFrame.cond_aura_unitTypeDD,  false, "Unit type")
             else
-                _SetDDEnabled(condFrame.cond_aura_distanceDD,   true, "Distance")
-                _SetDDEnabled(condFrame.cond_aura_singleAoeDD,  true, "Single/AOE")
-                _SetDDEnabled(condFrame.cond_aura_unitTypeDD,   true, "Unit type")
+                _SetDDEnabled(condFrame.cond_aura_singleAoeDD, true, "Single/AOE")
+                _SetDDEnabled(condFrame.cond_aura_unitTypeDD,  true, "Unit type")
             end
         end
 
@@ -5213,8 +5635,15 @@ local function UpdateConditionsUI(data)
         local hasCursive = _HasCursive()
         local isBuff     = (data.type == "Buff")
 
-        -- Row 11: Combo points / class-specific note
-        if _IsRogueOrDruid() then
+        -- Combo points / class-specific note / weapon filter
+        local isRogueOrDruid = _IsRogueOrDruid and _IsRogueOrDruid() or false
+        local isWPS          = _IsWarriorPaladinShaman()
+
+        if condFrame.cond_aura_weaponDD then
+            condFrame.cond_aura_weaponDD:Hide()
+        end
+
+        if isRogueOrDruid then
             condFrame.cond_aura_cp_cb:Show()
             if condFrame.cond_aura_class_note then
                 condFrame.cond_aura_class_note:Hide()
@@ -5236,6 +5665,20 @@ local function UpdateConditionsUI(data)
                 condFrame.cond_aura_cp_val:Hide()
                 condFrame.cond_aura_cp_val_enter:Hide()
             end
+
+        elseif isWPS and condFrame.cond_aura_weaponDD then
+            -- Warrior / Paladin / Shaman: weapon / fighting-style dropdown instead of CPs
+            condFrame.cond_aura_cp_cb:Hide()
+            condFrame.cond_aura_cp_comp:Hide()
+            condFrame.cond_aura_cp_val:Hide()
+            condFrame.cond_aura_cp_val_enter:Hide()
+            if condFrame.cond_aura_class_note then
+                condFrame.cond_aura_class_note:Hide()
+            end
+
+            condFrame.cond_aura_weaponDD:Show()
+            InitWeaponDropdown(condFrame.cond_aura_weaponDD, data, "aura")
+
         else
             condFrame.cond_aura_cp_cb:Hide()
             condFrame.cond_aura_cp_comp:Hide()
@@ -5587,6 +6030,8 @@ local function UpdateConditionsUI(data)
         condFrame.cond_ability_remaining_val:Hide()
         condFrame.cond_ability_remaining_val_enter:Hide()
         if condFrame.cond_ability_text_time then condFrame.cond_ability_text_time:Hide() end
+		if condFrame.cond_ability_target_alive then condFrame.cond_ability_target_alive:Hide() end
+        if condFrame.cond_ability_target_dead  then condFrame.cond_ability_target_dead:Hide()  end
 
         if condFrame.cond_ability_hp_my then condFrame.cond_ability_hp_my:Hide() end
         if condFrame.cond_ability_hp_tgt then condFrame.cond_ability_hp_tgt:Hide() end
@@ -5598,6 +6043,7 @@ local function UpdateConditionsUI(data)
         if condFrame.cond_ability_cp_comp then condFrame.cond_ability_cp_comp:Hide() end
         if condFrame.cond_ability_cp_val then condFrame.cond_ability_cp_val:Hide() end
         if condFrame.cond_ability_cp_val_enter then condFrame.cond_ability_cp_val_enter:Hide() end
+		if condFrame.cond_ability_weaponDD then condFrame.cond_ability_weaponDD:Hide() end
         if condFrame.cond_ability_class_note then condFrame.cond_ability_class_note:Hide() end
 
         if condFrame.cond_ability_slider_glow then condFrame.cond_ability_slider_glow:Hide() end
@@ -5642,6 +6088,9 @@ local function UpdateConditionsUI(data)
         if condFrame.cond_item_inv_wep_offhand then condFrame.cond_item_inv_wep_offhand:Hide() end
         if condFrame.cond_item_inv_wep_ranged then condFrame.cond_item_inv_wep_ranged:Hide() end
         if condFrame.cond_item_class_note then condFrame.cond_item_class_note:Hide() end
+		if condFrame.cond_item_target_alive then condFrame.cond_item_target_alive:Hide() end
+        if condFrame.cond_item_target_dead  then condFrame.cond_item_target_dead:Hide()  end
+		if condFrame.cond_item_weaponDD then condFrame.cond_item_weaponDD:Hide() end
 
         -- hide ability DDs when not editing an ability
         if condFrame.cond_ability_distanceDD  then condFrame.cond_ability_distanceDD:Hide()  end
@@ -5663,6 +6112,12 @@ end
 -- Update frame controls to reflect db for `key`
 function UpdateCondFrameForKey(key)
     if not condFrame or not key then return end
+	
+	-- When switching icons, force-close the AND/OR logic popup for the old icon
+    if DoiteAuraLogicFrame and DoiteAuraLogicFrame:IsShown() then
+        DoiteAuraLogicFrame:Hide()
+    end
+	
     currentKey = key
 	_G["DoiteEdit_CurrentKey"] = key
     local data = EnsureDBEntry(key)

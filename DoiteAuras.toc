@@ -2,7 +2,7 @@
 ## Title: |cff6FA8DC[DoiteAuras]|r
 ## Notes: Simplified WeakAura-style addon
 ## Author: Doite
-## Version: 1.0.4
+## Version: 1.0.5
 ## SavedVariablesPerCharacter: DoiteAurasDB
 
 DoiteAuras.lua
@@ -11,4 +11,5 @@ Modules\DoiteEdit.lua
 Modules\DoiteGlow.lua
 Modules\DoiteConditions.lua
 Modules\DoiteGroup.lua
+Modules\DoiteLogic.lua
 Modules\DoiteExport.lua
