@@ -14,6 +14,7 @@ _Please respect the license note._
 
 ## Tutorial & How-to instructions
 [![Watch the video](https://img.youtube.com/vi/T-D1KVIuvjA/maxresdefault.jpg)](https://youtu.be/T-D1KVIuvjA)
+_Have not added video yet_
 
 ## Quick start
 - Use the **minimap icon** <img width="32" height="32" alt="doiteauras-icon" src="https://github.com/user-attachments/assets/908afec6-0de1-4a4a-8081-198cac49e937" />
@@ -25,15 +26,15 @@ _Please respect the license note._
 3.  Place the `DoiteAuras` folder directly into the `AddOns` folder.
 4.  Restart World of Warcraft completely.
 
-Alternatively, just take this link and add to the launcher (addon tab -> "+ Add new addon") or similarly with GithubAddonsManager: https://github.com/Player-Doite/DoiteAuras
+Alternatively, take this link and add to the launcher (addon tab -> "+ Add new addon") or similarly with GithubAddonsManager: https://github.com/Player-Doite/DoiteAuras
 
 ## Contact
 Addon made by Doite, while all extensions of the 1.12/LUA 5.0 API by mentioned links at the top of this description. Contact me in-game, github via "Issues", or via Discord if something is wrong with __the addon__.
-You can check out my other addon here: [Tactica](https://github.com/Player-Doite/tactica) (_a raid helper for raid-leaders, including auto-building raids, auto-invite, posting tactics, assigning roles in raid roster and more._)
+You can check out my other addon here: [Tactica](https://github.com/Player-Doite/tactica) (_a raid helper for raid-leaders, including auto-building raids, auto-invite, posting tactics, assigning roles in raid roster and more_).
 
 ## Thanks to all fellow addon developers - while a special thank you to:
-[NAME](GITHUB LINK) - Description
+Not added yet - [NAME](GITHUB LINK) - Description
 
-[NAME](GITHUB LINK) - Description
+Not added yet - [NAME](GITHUB LINK) - Description
 
-[NAME](GITHUB LINK) - Description
+Not added yet - [NAME](GITHUB LINK) - Description
