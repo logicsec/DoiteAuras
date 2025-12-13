@@ -2362,9 +2362,8 @@ addBtn:SetScript("OnClick", function()
   if not name or name == "" then return end
   if name == "Select from dropdown" then return end
 
-  -- Keep special headers exactly as written; everything else gets TitleCase
   local isSpecialHeader = (name == "---EQUIPPED TRINKET SLOTS---" or name == "---EQUIPPED WEAPON SLOTS---")
-  if not isSpecialHeader then
+  if not isSpecialHeader and (t == "Buff" or t == "Debuff") then
       name = TitleCase(name)
   end
 
@@ -2610,12 +2609,50 @@ _daMiniInit:SetScript("OnEvent", function()
   DA_CreateMinimapButton()
 end)
 
--- Slash
+-- /slash commands
 SLASH_DOITEAURAS1="/da"
-SLASH_DOITEAURAS2="/doiteauras"
+SLASH_DOITEAURAS2="/doiteaurs"
 SLASH_DOITEAURAS3="/doiteaura"
 SLASH_DOITEAURAS4="/doite"
-SlashCmdList["DOITEAURAS"] = function()
+
+SlashCmdList["DOITEAURAS"] = function(msg)
+  -- msg is a plain string in 1.12, no methods on it
+  msg = msg or ""
+  msg = string.lower(msg)
+
+  -- Split into first word (cmd) and rest (arguments)
+  local cmd, rest
+  local firstSpace = string.find(msg, " ", 1, true)
+  if firstSpace then
+    cmd  = string.sub(msg, 1, firstSpace - 1)
+    rest = string.sub(msg, firstSpace + 1)
+  else
+    cmd  = msg
+    rest = ""
+  end
+
+  -- Trim whitespace around rest
+  rest = string.gsub(rest, "^%s+", "")
+  rest = string.gsub(rest, "%s+$", "")
+
+  -- /da cleartimers [name/spellid]  or  /da ct [name/spellid]
+  if cmd == "cleartimers" or cmd == "ct" then
+    local clearFn = _G["DoiteTrack_ClearTimers"]
+    if type(clearFn) == "function" then
+      -- ""      -> clear all
+      -- "rend"  -> clear all ranks whose meta.name normalises to "rend"
+      -- "11574" -> clear only that spellId
+      clearFn(rest)
+    else
+      local cf = (DEFAULT_CHAT_FRAME or ChatFrame1)
+      if cf then
+        cf:AddMessage("|cff6FA8DCDoiteAuras:|r Timer clear function not available (DoiteTrack not loaded?).")
+      end
+    end
+    return
+  end
+
+  -- No /ct command -> normal DoiteAuras toggle
   if DA_IsHardDisabled() then
     local cf = (DEFAULT_CHAT_FRAME or ChatFrame1)
     if cf then
@@ -2623,6 +2660,7 @@ SlashCmdList["DOITEAURAS"] = function()
     end
     return
   end
+
   if frame:IsShown() then
     frame:Hide()
   else

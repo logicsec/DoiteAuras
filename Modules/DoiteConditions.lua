@@ -4,7 +4,6 @@
 -- WoW 1.12 | Lua 5.0
 ---------------------------------------------------------------
 
-local addonName, _ = "DoiteConditions"
 local DoiteConditions = {}
 _G["DoiteConditions"] = DoiteConditions
 
@@ -665,9 +664,8 @@ local function _ParseItemLink(link)
 end
 
 -- Scan player inventory + bags for the configured item
--- Returns: hasEquipped, hasBag, firstEquippedSlot, firstBagLocTableOrNil
 local function _ScanPlayerItemInstances(data)
-    if not data then return false, false, nil, nil end
+    if not data then return false, false, nil, nil, 0, 0 end
 
     local expectedId   = data.itemId or data.itemID
     if expectedId then expectedId = tonumber(expectedId) end
@@ -676,6 +674,7 @@ local function _ScanPlayerItemInstances(data)
     local hasEquipped, hasBag = false, false
     local firstEquippedSlot   = nil
     local firstBagLoc         = nil
+    local eqCount, bagCount   = 0, 0
 
     -- Equipped slots (1..19 is enough; trinkets/weapons are in here)
     local slot = 1
@@ -694,6 +693,16 @@ local function _ScanPlayerItemInstances(data)
                 if not firstEquippedSlot then
                     firstEquippedSlot = slot
                 end
+
+                -- count stack size / charges for this equipped item
+                local c = 1
+                if GetInventoryItemCount then
+                    local n = GetInventoryItemCount("player", slot)
+                    if n and n > 0 then
+                        c = n
+                    end
+                end
+                eqCount = eqCount + c
             end
         end
         slot = slot + 1
@@ -720,6 +729,16 @@ local function _ScanPlayerItemInstances(data)
                         if not firstBagLoc then
                             firstBagLoc = { bag = bag, slot = bslot }
                         end
+
+                        -- count items in this bag slot
+                        local c = 1
+                        if GetContainerItemInfo then
+                            local _, n = GetContainerItemInfo(bag, bslot)
+                            if n and n > 0 then
+                                c = n
+                            end
+                        end
+                        bagCount = bagCount + c
                     end
                 end
                 bslot = bslot + 1
@@ -728,7 +747,7 @@ local function _ScanPlayerItemInstances(data)
         bag = bag + 1
     end
 
-    return hasEquipped, hasBag, firstEquippedSlot, firstBagLoc
+    return hasEquipped, hasBag, firstEquippedSlot, firstBagLoc, eqCount, bagCount
 end
 
 -- Single inventory slot: does it have an item and is that item on cooldown?
@@ -775,22 +794,35 @@ end
 
 -- Core item state used by both condition checks and text overlays
 local _ItemStateScratch = {
-    hasItem     = false,
-    isMissing   = false,
-    passesWhere = true,
-    modeMatches = true,
-    rem         = nil,
-    dur         = nil,
+    hasItem        = false,
+    isMissing      = false,
+    passesWhere    = true,
+    modeMatches    = true,
+    rem            = nil,
+    dur            = nil,
+
+    -- stack/amount tracking
+    eqCount        = 0,   -- total amount in equipped gear
+    bagCount       = 0,   -- total amount in bags (0..4)
+    totalCount     = 0,   -- eqCount + bagCount
+    effectiveCount = 0,   -- count restricted by whereBag/whereEquipped
 }
 
 local function _ResetItemState(state)
-    state.hasItem     = false
-    state.isMissing   = false
-    state.passesWhere = true
-    state.modeMatches = true
-    state.rem         = nil
-    state.dur         = nil
+    state.hasItem        = false
+    state.isMissing      = false
+    state.passesWhere    = true
+    state.modeMatches    = true
+    state.rem            = nil
+    state.dur            = nil
+
+    -- reset counts
+    state.eqCount        = 0
+    state.bagCount       = 0
+    state.totalCount     = 0
+    state.effectiveCount = 0
 end
+
 
 local function _EvaluateItemCoreState(data, c)
     local state = _ItemStateScratch
@@ -843,6 +875,13 @@ local function _EvaluateItemCoreState(data, c)
                 state.isMissing   = true
                 state.modeMatches = false
                 state.passesWhere = true
+
+                -- counts for synthetic entries
+                state.eqCount        = 0
+                state.bagCount       = 0
+                state.totalCount     = 0
+                state.effectiveCount = 0
+
                 return state
             end
 
@@ -940,8 +979,7 @@ local function _EvaluateItemCoreState(data, c)
                 end
 
             else
-                -- TRINKET_BOTH:
-                -- Require all equipped use-trinkets to be in the requested state.
+                -- TRINKET_BOTH: Require all equipped use-trinkets to be in the requested state.
                 if mode == "oncd" then
                     local ok = true
                     if use1 and not on1 then ok = false end
@@ -970,17 +1008,36 @@ local function _EvaluateItemCoreState(data, c)
 
         -- No Whereabouts for synthetic entries; treat as pass
         state.passesWhere = true
+
+        -- for synthetic entries, treat "stack count" as 1 if an item exists
+        if state.hasItem then
+            state.eqCount        = 1
+            state.bagCount       = 0
+            state.totalCount     = 1
+            state.effectiveCount = 1
+        else
+            state.eqCount        = 0
+            state.bagCount       = 0
+            state.totalCount     = 0
+            state.effectiveCount = 0
+        end
+
         return state
     end
 
     -- --------------------------------------------------------------------
     -- 2) Normal items (Whereabouts: equipped / bag / missing)
     -- --------------------------------------------------------------------
-    local hasEquipped, hasBag, eqSlot, bagLoc = _ScanPlayerItemInstances(data)
+    local hasEquipped, hasBag, eqSlot, bagLoc, eqCount, bagCount = _ScanPlayerItemInstances(data)
     local missing = (not hasEquipped and not hasBag)
 
     state.hasItem   = not missing
     state.isMissing = missing
+
+    -- raw counts
+    state.eqCount    = eqCount or 0
+    state.bagCount   = bagCount or 0
+    state.totalCount = (state.eqCount or 0) + (state.bagCount or 0)
 
     local passWhere = false
     if c.whereEquipped and hasEquipped then passWhere = true end
@@ -988,7 +1045,17 @@ local function _EvaluateItemCoreState(data, c)
     if c.whereMissing  and missing     then passWhere = true end
     state.passesWhere = passWhere
 
-    -- If the editor forced at least one Whereabouts
+    -- effective count only from selected whereabouts
+    local eff = 0
+    if c.whereEquipped and state.eqCount and state.eqCount > 0 then
+        eff = eff + state.eqCount
+    end
+    if c.whereBag and state.bagCount and state.bagCount > 0 then
+        eff = eff + state.bagCount
+    end
+    -- If only whereMissing is set, eff stays 0; DoiteEdit hides stack UI there.
+    state.effectiveCount = eff
+
     if not passWhere then
         return state
     end
@@ -3666,7 +3733,23 @@ local function CheckItemConditions(data)
     end
 
     -- --------------------------------------------------------------------
-    -- 8. Remaining (item cooldown time left)
+    -- 8. Stack / amount threshold (bags + equipped, respecting Whereabouts)
+    -- --------------------------------------------------------------------
+    if show and c.stacksEnabled
+       and c.stacksComp and c.stacksComp ~= ""
+       and c.stacksVal  ~= nil and c.stacksVal  ~= "" then
+
+        local threshold = tonumber(c.stacksVal)
+        if threshold and state then
+            local cnt = state.effectiveCount or 0
+            if not _StacksPasses(cnt, c.stacksComp, threshold) then
+                show = false
+            end
+        end
+    end
+
+    -- --------------------------------------------------------------------
+    -- 9. Remaining (item cooldown time left)
     --     Editor only allows this when mode == "oncd" and not whereMissing.
     -- --------------------------------------------------------------------
     if show and c.remainingEnabled
@@ -4278,6 +4361,7 @@ local function _Doite_UpdateOverlayForFrame(frame, key, dataTbl, slideActive)
     -- ========== Remaining Time ==========
     local wantRem = false
     local remText = nil
+	local itemState = nil
 
     -- Decide if show time text for abilities
     local function _ShowAbilityTime(ca, rem, dur, slide)
@@ -4355,16 +4439,20 @@ local function _Doite_UpdateOverlayForFrame(frame, key, dataTbl, slideActive)
            and dataTbl.conditions.item then
 
             local ci = dataTbl.conditions.item
-            if ci.textTimeRemaining == true then
-                -- Reuse the same core state CheckItemConditions uses
-                local state = _EvaluateItemCoreState(dataTbl, ci)
-                if state and state.rem and state.rem > 0 then
-                    remText = _FmtRem(state.rem)
-                    wantRem = (remText ~= nil)
 
-                    -- Let group “time” sort by this remaining
-                    frame._daSortRem = state.rem
-                end
+            -- Only compute core state if actually need it (time and/or stacks)
+            if ci.textTimeRemaining == true or ci.textStackCounter == true then
+                itemState = _EvaluateItemCoreState(dataTbl, ci)
+            end
+
+            if ci.textTimeRemaining == true
+               and itemState and itemState.rem and itemState.rem > 0 then
+
+                remText = _FmtRem(itemState.rem)
+                wantRem = (remText ~= nil)
+
+                -- Let group “time” sort by this remaining
+                frame._daSortRem = itemState.rem
             end
 			
         ----------------------------------------------------------------
@@ -4487,6 +4575,28 @@ local function _Doite_UpdateOverlayForFrame(frame, key, dataTbl, slideActive)
                     frame._daTextStacks:SetTextColor(1, 0.2, 0.2, 1) -- red
                     frame._daTextStacks:Show()
                 end
+            end
+        end
+    end
+	    -- ========== Stack Counter (items: total amount) ==========
+    if dataTbl
+       and dataTbl.type == "Item"
+       and dataTbl.conditions
+       and dataTbl.conditions.item then
+
+        local ci = dataTbl.conditions.item
+        if ci.textStackCounter == true then
+            -- Reuse any state already computed in the Item branch above
+            local state = itemState
+            if not state then
+                state = _EvaluateItemCoreState(dataTbl, ci)
+            end
+
+            local cnt = state and state.effectiveCount or nil
+            if cnt and cnt >= 1 then
+                frame._daTextStacks:SetText(tostring(cnt))
+                frame._daTextStacks:SetTextColor(1, 0.2, 0.2, 1)
+                frame._daTextStacks:Show()
             end
         end
     end

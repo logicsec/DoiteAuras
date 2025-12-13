@@ -36,16 +36,6 @@ local function _IsRogueOrDruid()
     return (c == "ROGUE" or c == "DRUID")
 end
 
--- Lightweight Cursive detection (evaluated on demand so load order doesn't matter)
-local function _HasCursive()
-    if type(Cursive) ~= "table" then return false end
-    local curses = Cursive.curses
-    if type(curses) ~= "table" then return false end
-    if type(curses.GetCurseData) ~= "function" then return false end
-    if type(curses.TimeRemaining) ~= "function" then return false end
-    return true
-end
-
 -- === Lightweight throttle for heavy UI work (prevents lag while dragging sliders) ===
 local _DoiteEdit_PendingHeavy = false
 local _DoiteEdit_Accum = 0
@@ -1064,20 +1054,14 @@ local function CreateConditionsUI()
 		[11] = row11_y,
 	}
 
-    --------------------------------------------------
-    -- Ability rows
-    --------------------------------------------------
-    if GetNampowerVersion then
-        condFrame.cond_ability_usable = MakeCheck("DoiteCond_Ability_Usable", "Usable", 0, row1_y)
-    else
-        condFrame.cond_ability_usable = _Parent():CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        condFrame.cond_ability_usable:SetPoint("TOPLEFT", _Parent(), "TOPLEFT", 4, row1_y + 3)
-        condFrame.cond_ability_usable:SetText("(Usable req. Nampower mod)")
-        condFrame.cond_ability_usable:SetWidth(80)
-    end
-    condFrame.cond_ability_notcd  = MakeCheck("DoiteCond_Ability_NotCD", "Not on cooldown", 70, row1_y)
-    condFrame.cond_ability_oncd   = MakeCheck("DoiteCond_Ability_OnCD", "On cooldown", 190, row1_y)
+	--------------------------------------------------
+	-- Ability rows
+	--------------------------------------------------
+	condFrame.cond_ability_usable = MakeCheck("DoiteCond_Ability_Usable", "Usable", 0, row1_y)
+	condFrame.cond_ability_notcd  = MakeCheck("DoiteCond_Ability_NotCD", "Not on cooldown", 70, row1_y)
+	condFrame.cond_ability_oncd   = MakeCheck("DoiteCond_Ability_OnCD", "On cooldown", 190, row1_y)
 	SetSeparator("ability", 1, "USABILITY & COOLDOWN", true, true)
+
 
     condFrame.cond_ability_incombat   = MakeCheck("DoiteCond_Ability_InCombat", "In combat", 0, row2_y)
     condFrame.cond_ability_outcombat  = MakeCheck("DoiteCond_Ability_OutCombat", "Out of combat", 80, row2_y)
@@ -1144,7 +1128,7 @@ local function CreateConditionsUI()
     condFrame.cond_ability_hp_val_enter:Hide()
     SetSeparator("ability", 9, "HEALTH CONDITION", true, true)
 
-    condFrame.cond_ability_text_time = MakeCheck("DoiteCond_Ability_TextTime", "Text: Time remaining", 0, row10_y)
+    condFrame.cond_ability_text_time = MakeCheck("DoiteCond_Ability_TextTime", "Icon text: Remaining", 0, row10_y)
     SetSeparator("ability", 10, "ICON TEXT", true, true)
 
 	-- Combo points dropdown (class-specific: druid / rogue)
@@ -1245,13 +1229,16 @@ local function CreateConditionsUI()
     condFrame.cond_aura_hp_val_enter:Hide()	
     SetSeparator("aura", 8, "HEALTH CONDITION", true, true)
 
-    -- Row 8: Aura owner (moved down from row7)
-    condFrame.cond_aura_mine = MakeCheck("DoiteCond_Aura_MyAura", "My Aura", 0, row9_y)
-    condFrame.cond_aura_owner_tip = _Parent():CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    condFrame.cond_aura_owner_tip:SetPoint("LEFT", condFrame.cond_aura_mine.text, "RIGHT", 4, 0)
-    condFrame.cond_aura_owner_tip:SetText("(Req. Cursive addon)")
-    condFrame.cond_aura_owner_tip:SetTextColor(0.6, 0.6, 0.6)
+    -- Aura owner
+    condFrame.cond_aura_mine   = MakeCheck("DoiteCond_Aura_MyAura",      "My Aura",     0,  row9_y)
+    condFrame.cond_aura_others = MakeCheck("DoiteCond_Aura_OthersAura",  "Others Aura", 75, row9_y)
+	condFrame.cond_aura_owner_tip = _Parent():CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    condFrame.cond_aura_owner_tip:SetPoint("LEFT", condFrame.cond_aura_others, "RIGHT", 70, -3)
+    condFrame.cond_aura_owner_tip:SetText("'Remaining' can only be used for a 'My Aura' on 'Target (Help/Harm)'")
+	condFrame.cond_aura_owner_tip:SetWidth(120)
+    condFrame.cond_aura_owner_tip:SetTextColor(1, 0.82, 0)
     condFrame.cond_aura_owner_tip:Hide()
+
     SetSeparator("aura", 9, "AURA OWNER", true, true)
 	
 	-- Time remaining & stacks
@@ -1271,8 +1258,8 @@ local function CreateConditionsUI()
     condFrame.cond_aura_stacks_val_enter:SetText("(#)")
     condFrame.cond_aura_stacks_val_enter:Hide()
 
-    condFrame.cond_aura_text_time  = MakeCheck("DoiteCond_Aura_TextTime",  "Text: Time remaining",  0,   row11_y-11)
-    condFrame.cond_aura_text_stack = MakeCheck("DoiteCond_Aura_TextStack", "Text: Stack counter", 150,   row11_y-11)
+    condFrame.cond_aura_text_time  = MakeCheck("DoiteCond_Aura_TextTime",  "Icon text: Remaining",  0,   row11_y-11)
+    condFrame.cond_aura_text_stack = MakeCheck("DoiteCond_Aura_TextStack", "Icon text: Stacks", 150,   row11_y-11)
 	SetSeparator("aura", 10, "TIME REMAINING & STACKS", true, true)
 	
     -- Class-specific (combo points)
@@ -1371,7 +1358,7 @@ local function CreateConditionsUI()
     -- VISUAL EFFECTS
     condFrame.cond_item_glow       = MakeCheck("DoiteCond_Item_Glow",      "Glow", 0,  row6_y)
     condFrame.cond_item_greyscale  = MakeCheck("DoiteCond_Item_Greyscale", "Grey", 70, row6_y)
-    condFrame.cond_item_text_time  = MakeCheck("DoiteCond_Item_TextTime",  "Text: Remaining time", 140, row6_y)
+    condFrame.cond_item_text_time  = MakeCheck("DoiteCond_Item_TextTime",  "Icon text: Remaining", 140, row6_y)
     SetSeparator("item", 6, "VISUAL EFFECTS", true, true)
 
     -- ITEM ROW: TARGET DISTANCE & TYPE
@@ -1385,56 +1372,68 @@ local function CreateConditionsUI()
     condFrame.cond_item_unitTypeDD:SetPoint("TOPLEFT", _Parent(), "TOPLEFT", 120, row7_y+3)
     if UIDropDownMenu_SetWidth then pcall(UIDropDownMenu_SetWidth, 100, condFrame.cond_item_unitTypeDD) end
 
+    -- STACKS (Item)
+	condFrame.cond_item_text_stack = MakeCheck("DoiteCond_Item_TextStack", "Icon text", 0, row8_y)
+    condFrame.cond_item_stacks_cb   = MakeCheck("DoiteCond_Item_StacksCB", "Stacks", 80, row8_y)
+    condFrame.cond_item_stacks_comp = MakeComparatorDD("DoiteCond_Item_StacksComp", 130, row8_y+3, 50)
+    condFrame.cond_item_stacks_val  = MakeSmallEdit("DoiteCond_Item_StacksVal", 225, row8_y-2, 40)
+    condFrame.cond_item_stacks_val_enter = _Parent():CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    condFrame.cond_item_stacks_val_enter:SetPoint("LEFT", condFrame.cond_item_stacks_val, "RIGHT", 4, 0)
+    condFrame.cond_item_stacks_val_enter:SetText("(#)")
+    condFrame.cond_item_stacks_val_enter:Hide()
+    SetSeparator("item", 8, "STACKS", true, true)
+
     -- RESOURCE (Power)
-    condFrame.cond_item_power      = MakeCheck("DoiteCond_Item_PowerCB", "Power", 0, row8_y)
-    condFrame.cond_item_power_comp = MakeComparatorDD("DoiteCond_Item_PowerComp", 65, row8_y+3, 50)
-    condFrame.cond_item_power_val  = MakeSmallEdit("DoiteCond_Item_PowerVal", 160, row8_y-2, 40)
+    condFrame.cond_item_power      = MakeCheck("DoiteCond_Item_PowerCB", "Power", 0, row9_y)
+    condFrame.cond_item_power_comp = MakeComparatorDD("DoiteCond_Item_PowerComp", 65, row9_y+3, 50)
+    condFrame.cond_item_power_val  = MakeSmallEdit("DoiteCond_Item_PowerVal", 160, row9_y-2, 40)
     condFrame.cond_item_power_val_enter = _Parent():CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     condFrame.cond_item_power_val_enter:SetPoint("LEFT", condFrame.cond_item_power_val, "RIGHT", 4, 0)
     condFrame.cond_item_power_val_enter:SetText("(%)")
     condFrame.cond_item_power_comp:Hide()
     condFrame.cond_item_power_val:Hide()
     condFrame.cond_item_power_val_enter:Hide()
-    SetSeparator("item", 8, "RESOURCE", true, true)
+    SetSeparator("item", 9, "RESOURCE", true, true)
+
 
     -- HEALTH CONDITION
-    condFrame.cond_item_hp_my   = MakeCheck("DoiteCond_Item_HP_My",  "My HP",     0, row9_y)
-    condFrame.cond_item_hp_tgt  = MakeCheck("DoiteCond_Item_HP_Tgt", "Target HP", 65, row9_y)
-    condFrame.cond_item_hp_comp = MakeComparatorDD("DoiteCond_Item_HP_Comp", 130, row9_y+3, 50)
-    condFrame.cond_item_hp_val  = MakeSmallEdit("DoiteCond_Item_HP_Val", 225, row9_y-2, 40)
+    condFrame.cond_item_hp_my   = MakeCheck("DoiteCond_Item_HP_My",  "My HP",     0, row10_y)
+    condFrame.cond_item_hp_tgt  = MakeCheck("DoiteCond_Item_HP_Tgt", "Target HP", 65, row10_y)
+    condFrame.cond_item_hp_comp = MakeComparatorDD("DoiteCond_Item_HP_Comp", 130, row10_y+3, 50)
+    condFrame.cond_item_hp_val  = MakeSmallEdit("DoiteCond_Item_HP_Val", 225, row10_y-2, 40)
     condFrame.cond_item_hp_val_enter = _Parent():CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     condFrame.cond_item_hp_val_enter:SetPoint("LEFT", condFrame.cond_item_hp_val, "RIGHT", 4, 0)
     condFrame.cond_item_hp_val_enter:SetText("(%)")
     condFrame.cond_item_hp_comp:Hide()
     condFrame.cond_item_hp_val:Hide()
     condFrame.cond_item_hp_val_enter:Hide()
-    SetSeparator("item", 9, "HEALTH CONDITION", true, true)
+    SetSeparator("item", 10, "HEALTH CONDITION", true, true)
 
     -- REMAINING TIME (no slider)
-    condFrame.cond_item_remaining_cb   = MakeCheck("DoiteCond_Item_RemCB", "Remaining", 0, row10_y)
-    condFrame.cond_item_remaining_comp = MakeComparatorDD("DoiteCond_Item_RemComp", 80, row10_y+3, 50)
-    condFrame.cond_item_remaining_val  = MakeSmallEdit("DoiteCond_Item_RemVal", 175, row10_y-2, 40)
+    condFrame.cond_item_remaining_cb   = MakeCheck("DoiteCond_Item_RemCB", "Remaining", 0, row11_y)
+    condFrame.cond_item_remaining_comp = MakeComparatorDD("DoiteCond_Item_RemComp", 80, row11_y+3, 50)
+    condFrame.cond_item_remaining_val  = MakeSmallEdit("DoiteCond_Item_RemVal", 175, row11_y-2, 40)
     condFrame.cond_item_remaining_val_enter = _Parent():CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     condFrame.cond_item_remaining_val_enter:SetPoint("LEFT", condFrame.cond_item_remaining_val, "RIGHT", 4, 0)
     condFrame.cond_item_remaining_val_enter:SetText("(sec.)")
     condFrame.cond_item_remaining_comp:Hide()
     condFrame.cond_item_remaining_val:Hide()
     condFrame.cond_item_remaining_val_enter:Hide()
-    SetSeparator("item", 10, "REMAINING TIME", true, true)
+    SetSeparator("item", 11, "REMAINING TIME", true, true)
 
     -- CLASS-SPECIFIC (Combo points)
-    condFrame.cond_item_cp_cb   = MakeCheck("DoiteCond_Item_CP_CB", "Combo points", 0, row11_y)
-    condFrame.cond_item_cp_comp = MakeComparatorDD("DoiteCond_Item_CP_Comp", 85, row11_y+3, 50)
-    condFrame.cond_item_cp_val  = MakeSmallEdit("DoiteCond_Item_CP_Val", 180, row11_y-2, 40)
+    condFrame.cond_item_cp_cb   = MakeCheck("DoiteCond_Item_CP_CB", "Combo points", 0, row12_y)
+    condFrame.cond_item_cp_comp = MakeComparatorDD("DoiteCond_Item_CP_Comp", 85, row12_y+3, 50)
+    condFrame.cond_item_cp_val  = MakeSmallEdit("DoiteCond_Item_CP_Val", 180, row12_y-2, 40)
     condFrame.cond_item_cp_val_enter = _Parent():CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     condFrame.cond_item_cp_val_enter:SetPoint("LEFT", condFrame.cond_item_cp_val, "RIGHT", 4, 0)
     condFrame.cond_item_cp_val_enter:SetText("(#)")
     condFrame.cond_item_cp_val_enter:Hide()
-    SetSeparator("item", 11, "CLASS-SPECIFIC", true, true)
+    SetSeparator("item", 12, "CLASS-SPECIFIC", true, true)
 
     -- Item: class-specific weapon / fighting-style dropdown (Shaman / Warrior / Paladin)
     condFrame.cond_item_weaponDD = CreateFrame("Frame", "DoiteCond_Item_WeaponDD", _Parent(), "UIDropDownMenuTemplate")
-    condFrame.cond_item_weaponDD:SetPoint("TOPLEFT", _Parent(), "TOPLEFT", -15, row11_y+3)
+    condFrame.cond_item_weaponDD:SetPoint("TOPLEFT", _Parent(), "TOPLEFT", -15, row12_y+3)
     if UIDropDownMenu_SetWidth then
         pcall(UIDropDownMenu_SetWidth, 90, condFrame.cond_item_weaponDD)
     end
@@ -1443,14 +1442,14 @@ local function CreateConditionsUI()
 
     -- Item: class-specific note for classes without combo points
     condFrame.cond_item_class_note = _Parent():CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    condFrame.cond_item_class_note:SetPoint("TOPLEFT", _Parent(), "TOPLEFT", 0, row11_y)
+    condFrame.cond_item_class_note:SetPoint("TOPLEFT", _Parent(), "TOPLEFT", 0, row12_y)
     condFrame.cond_item_class_note:SetTextColor(1, 0.82, 0)
     condFrame.cond_item_class_note:SetText("No class-specific option added for your class.")
     condFrame.cond_item_class_note:Hide()
 	
 	-- Item: dynamic Aura Conditions section
-    local itemAuraBaseY = row12_y
-    SetSeparator("item", 12, "ABILITY, BUFF, DEBUFF & TALENT CONDITIONS", true, true)
+    local itemAuraBaseY = row13_y
+    SetSeparator("item", 13, "ABILITY, BUFF, DEBUFF & TALENT CONDITIONS", true, true)
     condFrame.itemAuraAnchor = CreateFrame("Frame", nil, _Parent())
     condFrame.itemAuraAnchor:SetPoint("TOPLEFT",  _Parent(), "TOPLEFT",  0, itemAuraBaseY)
     condFrame.itemAuraAnchor:SetPoint("TOPRIGHT", _Parent(), "TOPRIGHT", 0, itemAuraBaseY)
@@ -1928,42 +1927,36 @@ end)
     -- Wiring: enforce exclusivity immediately + save to DB
     ----------------------------------------------------------------
 
-    -- Ability row1 scripts (Usable / NotCD / OnCD)
-    if GetNampowerVersion then
-		condFrame.cond_ability_usable:SetScript("OnClick", function()
-			if this:GetChecked() then
-				condFrame.cond_ability_notcd:SetChecked(false)
-				condFrame.cond_ability_oncd:SetChecked(false)
-				SetExclusiveAbilityMode("usable")
-			else
-				SetExclusiveAbilityMode(nil)
-			end
-		end)
-	end
-	
-    condFrame.cond_ability_notcd:SetScript("OnClick", function()
-        if this:GetChecked() then
-			if GetNampowerVersion then
-				condFrame.cond_ability_usable:SetChecked(false)
-			end
-            condFrame.cond_ability_oncd:SetChecked(false)
-            SetExclusiveAbilityMode("notcd")
-        else
-            SetExclusiveAbilityMode(nil)
-        end
-    end)
-	
-    condFrame.cond_ability_oncd:SetScript("OnClick", function()
-        if this:GetChecked() then
-			if GetNampowerVersion then
-				condFrame.cond_ability_usable:SetChecked(false)
-			end
-            condFrame.cond_ability_notcd:SetChecked(false)
-            SetExclusiveAbilityMode("oncd")
-        else
-            SetExclusiveAbilityMode(nil)
-        end
-    end)
+	-- Ability row1 scripts (Usable / NotCD / OnCD)
+	condFrame.cond_ability_usable:SetScript("OnClick", function()
+		if this:GetChecked() then
+			condFrame.cond_ability_notcd:SetChecked(false)
+			condFrame.cond_ability_oncd:SetChecked(false)
+			SetExclusiveAbilityMode("usable")
+		else
+			SetExclusiveAbilityMode(nil)
+		end
+	end)
+
+	condFrame.cond_ability_notcd:SetScript("OnClick", function()
+		if this:GetChecked() then
+			condFrame.cond_ability_usable:SetChecked(false)
+			condFrame.cond_ability_oncd:SetChecked(false)
+			SetExclusiveAbilityMode("notcd")
+		else
+			SetExclusiveAbilityMode(nil)
+		end
+	end)
+
+	condFrame.cond_ability_oncd:SetScript("OnClick", function()
+		if this:GetChecked() then
+			condFrame.cond_ability_usable:SetChecked(false)
+			condFrame.cond_ability_notcd:SetChecked(false)
+			SetExclusiveAbilityMode("oncd")
+		else
+			SetExclusiveAbilityMode(nil)
+		end
+	end)
 
     -- Item Usability & Cooldown (NotCD / OnCD only, exclusive)
     condFrame.cond_item_notcd:SetScript("OnClick", function()
@@ -2190,11 +2183,72 @@ end)
             if clicked then clicked:SetChecked(true) end
         end
     end
+	
+    function UpdateItemStacksForMissing()
+        if not condFrame or not condFrame.cond_item_where_missing then
+            return
+        end
+
+        local ms = condFrame.cond_item_where_missing:GetChecked()
+
+        local function _setCheckState(cb, enabled, clearWhenDisabling)
+            if not cb then return end
+            if enabled then
+                cb:Enable()
+                if cb.text and cb.text.SetTextColor then
+                    cb.text:SetTextColor(1, 0.82, 0)
+                end
+            else
+                if clearWhenDisabling and cb.SetChecked then
+                    cb:SetChecked(false)
+                end
+                cb:Disable()
+                if cb.text and cb.text.SetTextColor then
+                    cb.text:SetTextColor(0.6, 0.6, 0.6)
+                end
+            end
+        end
+
+        if ms then
+            -- Mark as Missing: visually clear + grey out stacks & icon text
+            _setCheckState(condFrame.cond_item_stacks_cb, false, true)
+            _setCheckState(condFrame.cond_item_text_stack, false, true)
+
+            if condFrame.cond_item_stacks_comp then
+                condFrame.cond_item_stacks_comp:Hide()
+            end
+            if condFrame.cond_item_stacks_val then
+                condFrame.cond_item_stacks_val:Hide()
+            end
+            if condFrame.cond_item_stacks_val_enter then
+                condFrame.cond_item_stacks_val_enter:Hide()
+            end
+
+        else
+            _setCheckState(condFrame.cond_item_stacks_cb, true, false)
+            _setCheckState(condFrame.cond_item_text_stack, true, false)
+
+            if condFrame.cond_item_stacks_cb
+               and condFrame.cond_item_stacks_cb.GetChecked
+               and condFrame.cond_item_stacks_cb:GetChecked() then
+                if condFrame.cond_item_stacks_comp then
+                    condFrame.cond_item_stacks_comp:Show()
+                end
+                if condFrame.cond_item_stacks_val then
+                    condFrame.cond_item_stacks_val:Show()
+                end
+                if condFrame.cond_item_stacks_val_enter then
+                    condFrame.cond_item_stacks_val_enter:Show()
+                end
+            end
+        end
+    end
 
     condFrame.cond_item_where_equipped:SetScript("OnClick", function()
         if not currentKey then this:SetChecked(false) return end
         EnforceItemWhereabouts(this)
         SaveItemWhereaboutsFromUI()
+        UpdateItemStacksForMissing()
         SafeRefresh(); SafeEvaluate()
         UpdateCondFrameForKey(currentKey)
     end)
@@ -2203,6 +2257,7 @@ end)
         if not currentKey then this:SetChecked(false) return end
         EnforceItemWhereabouts(this)
         SaveItemWhereaboutsFromUI()
+        UpdateItemStacksForMissing()
         SafeRefresh(); SafeEvaluate()
         UpdateCondFrameForKey(currentKey)
     end)
@@ -2211,6 +2266,7 @@ end)
         if not currentKey then this:SetChecked(false) return end
         EnforceItemWhereabouts(this)
         SaveItemWhereaboutsFromUI()
+        UpdateItemStacksForMissing()
         SafeRefresh(); SafeEvaluate()
         UpdateCondFrameForKey(currentKey)
     end)
@@ -2340,20 +2396,42 @@ end)
 
     -- Aura exclusivity (found / missing)
     condFrame.cond_aura_found:SetScript("OnClick", function()
+        if not currentKey then
+            this:SetChecked(false)
+            return
+        end
+
         if this:GetChecked() then
             condFrame.cond_aura_missing:SetChecked(false)
             SetExclusiveAuraFoundMode("found")
         else
             SetExclusiveAuraFoundMode(nil)
         end
+
+        -- Keep DB/UI logic in sync (needed later when greying out owner on "missing")
+        if UpdateCondFrameForKey then
+            UpdateCondFrameForKey(currentKey)
+        end
+        SafeRefresh(); SafeEvaluate()
     end)
+
     condFrame.cond_aura_missing:SetScript("OnClick", function()
+        if not currentKey then
+            this:SetChecked(false)
+            return
+        end
+
         if this:GetChecked() then
             condFrame.cond_aura_found:SetChecked(false)
             SetExclusiveAuraFoundMode("missing")
         else
             SetExclusiveAuraFoundMode(nil)
         end
+
+        if UpdateCondFrameForKey then
+            UpdateCondFrameForKey(currentKey)
+        end
+        SafeRefresh(); SafeEvaluate()
     end)
 
     -- Aura combat row 2 - toggles (independent)
@@ -2465,23 +2543,114 @@ end)
 		UpdateCondFrameForKey(currentKey)
 	end)
 
-    -- Aura owner flag ("My Aura" only).
-    local function SaveAuraOwnerFlags()
-        if not currentKey then return end
-        local d = EnsureDBEntry(currentKey)
-        d.conditions = d.conditions or {}
-        d.conditions.aura = d.conditions.aura or {}
+    -- Aura owner flags ("My Aura" / "Others Aura") + dependent controls.
+    local function _SetAuraCheckEnabled(cb, enabled, clearWhenDisabling)
+        if not cb then return end
 
-        local mine = condFrame.cond_aura_mine:GetChecked() and true or false
-        d.conditions.aura.onlyMine = mine or nil
+        if enabled then
+            if cb.Enable then cb:Enable() end
+            if cb.text and cb.text.SetTextColor then
+                cb.text:SetTextColor(1, 0.82, 0)
+            end
+        else
+            if clearWhenDisabling and cb.SetChecked then
+                cb:SetChecked(false)
+            end
+            if cb.Disable then cb:Disable() end
+            if cb.text and cb.text.SetTextColor then
+                cb.text:SetTextColor(0.6, 0.6, 0.6)
+            end
+        end
     end
 
-    condFrame.cond_aura_mine:SetScript("OnClick", function()
-        if not currentKey then this:SetChecked(false) return end
-        SaveAuraOwnerFlags()
-        SafeRefresh(); SafeEvaluate()
-        UpdateCondFrameForKey(currentKey)
-    end)
+    local function AuraOwner_UpdateDependentChecks()
+        if not condFrame then return end
+
+        local mine   = condFrame.cond_aura_mine
+                            and condFrame.cond_aura_mine.GetChecked
+                            and condFrame.cond_aura_mine:GetChecked()
+        local others = condFrame.cond_aura_others
+                            and condFrame.cond_aura_others.GetChecked
+                            and condFrame.cond_aura_others:GetChecked()
+
+        local ownerActive = (mine or others) and true or false
+
+        local rem   = condFrame.cond_aura_remaining_cb
+        local textR = condFrame.cond_aura_text_time
+
+        if ownerActive then
+            -- Owner filter active: allow and auto-check Remaining + Text: Remaining time.
+            _SetAuraCheckEnabled(rem,   true, false)
+            _SetAuraCheckEnabled(textR, true, false)
+
+            if rem   and rem.GetChecked   and not rem:GetChecked()   then rem:SetChecked(true)   end
+            if textR and textR.GetChecked and not textR:GetChecked() then textR:SetChecked(true) end
+        else
+            -- No owner flag: hard disable + uncheck both.
+            _SetAuraCheckEnabled(rem,   false, true)
+            _SetAuraCheckEnabled(textR, false, true)
+        end
+    end
+
+    local function AuraOwner_EnforceExclusivity(changed)
+        if not condFrame then return end
+        local mine   = condFrame.cond_aura_mine
+        local others = condFrame.cond_aura_others
+
+        if not mine or not others then
+            AuraOwner_UpdateDependentChecks()
+            return
+        end
+
+        if changed == mine and mine:GetChecked() then
+            others:SetChecked(false)
+        elseif changed == others and others:GetChecked() then
+            mine:SetChecked(false)
+        end
+
+        -- "Neither" is allowed; no extra enforcement here.
+
+        AuraOwner_UpdateDependentChecks()
+    end
+
+    local function SaveAuraOwnerFlags(changed)
+        if not currentKey then return end
+
+        local d = EnsureDBEntry(currentKey)
+        d.conditions      = d.conditions      or {}
+        d.conditions.aura = d.conditions.aura or {}
+
+        local mine   = (condFrame.cond_aura_mine   and condFrame.cond_aura_mine:GetChecked())   and true or false
+        local others = (condFrame.cond_aura_others and condFrame.cond_aura_others:GetChecked()) and true or false
+
+        -- Hard exclusivity at DB level: if both somehow end up true, keep only the one just clicked.
+        if mine and others then
+            if changed == condFrame.cond_aura_mine then
+                others = false
+                if condFrame.cond_aura_others and condFrame.cond_aura_others.SetChecked then
+                    condFrame.cond_aura_others:SetChecked(false)
+                end
+            elseif changed == condFrame.cond_aura_others then
+                mine = false
+                if condFrame.cond_aura_mine and condFrame.cond_aura_mine.SetChecked then
+                    condFrame.cond_aura_mine:SetChecked(false)
+                end
+            else
+                -- Fallback: prefer "My Aura"
+                others = false
+                if condFrame.cond_aura_others and condFrame.cond_aura_others.SetChecked then
+                    condFrame.cond_aura_others:SetChecked(false)
+                end
+            end
+        end
+
+        d.conditions.aura.onlyMine   = mine   or nil
+        d.conditions.aura.onlyOthers = others or nil
+
+        -- Also update remaining/text checks whenever owner flags change.
+        AuraOwner_UpdateDependentChecks()
+    end
+
 
     -- Aura remaining toggle
     condFrame.cond_aura_remaining_cb:SetScript("OnClick", function()
@@ -2494,6 +2663,45 @@ end)
         SafeRefresh()
 		SafeEvaluate()
     end)
+	
+    -- Wire up the Aura owner checkboxes ("My Aura" / "Others Aura")
+    if condFrame.cond_aura_mine then
+        condFrame.cond_aura_mine:SetScript("OnClick", function()
+            if not currentKey then
+                this:SetChecked(false)
+                return
+            end
+
+            -- Enforce exclusive state and update Remaining/Text logic
+            AuraOwner_EnforceExclusivity(this)
+            SaveAuraOwnerFlags(this)
+
+            SafeRefresh(); SafeEvaluate()
+
+            if UpdateCondFrameForKey then
+                UpdateCondFrameForKey(currentKey)
+            end
+        end)
+    end
+
+    if condFrame.cond_aura_others then
+        condFrame.cond_aura_others:SetScript("OnClick", function()
+            if not currentKey then
+                this:SetChecked(false)
+                return
+            end
+
+            -- Enforce exclusive state and update Remaining/Text logic
+            AuraOwner_EnforceExclusivity(this)
+            SaveAuraOwnerFlags(this)
+
+            SafeRefresh(); SafeEvaluate()
+
+            if UpdateCondFrameForKey then
+                UpdateCondFrameForKey(currentKey)
+            end
+        end)
+    end
 
     -- Aura stacks toggle
     condFrame.cond_aura_stacks_cb:SetScript("OnClick", function()
@@ -2673,6 +2881,34 @@ end)
         local d = EnsureDBEntry(currentKey); d.conditions.item = d.conditions.item or {}
         d.conditions.item.remainingEnabled = this:GetChecked() and true or false
         UpdateCondFrameForKey(currentKey); SafeRefresh(); SafeEvaluate()
+    end)
+	
+	-- Item Stacks toggle
+    condFrame.cond_item_stacks_cb:SetScript("OnClick", function()
+        if not currentKey then this:SetChecked(false) return end
+        local enabled = this:GetChecked() and true or false
+        local d = EnsureDBEntry(currentKey); d.conditions.item = d.conditions.item or {}
+        d.conditions.item.stacksEnabled = enabled
+
+        if enabled then
+            condFrame.cond_item_stacks_comp:Show()
+            condFrame.cond_item_stacks_val:Show()
+            condFrame.cond_item_stacks_val_enter:Show()
+        else
+            condFrame.cond_item_stacks_comp:Hide()
+            condFrame.cond_item_stacks_val:Hide()
+            condFrame.cond_item_stacks_val_enter:Hide()
+        end
+
+        UpdateCondFrameForKey(currentKey); SafeRefresh(); SafeEvaluate()
+    end)
+
+    -- Item text: stack counter
+    condFrame.cond_item_text_stack:SetScript("OnClick", function()
+        if not currentKey then this:SetChecked(false) return end
+        local d = EnsureDBEntry(currentKey); d.conditions.item = d.conditions.item or {}
+        d.conditions.item.textStackCounter = this:GetChecked() and true or false
+        SafeRefresh(); SafeEvaluate()
     end)
 
     -- Item glow/greyscale
@@ -2948,6 +3184,15 @@ end)
         local d = EnsureDBEntry(currentKey)
         d.conditions.item = d.conditions.item or {}
         d.conditions.item.remainingComp = picked
+        SafeRefresh(); SafeEvaluate()
+    end)
+	
+	-- Item Stacks comparator
+    InitComparatorDD(condFrame.cond_item_stacks_comp, function(picked)
+        if not currentKey then return end
+        local d = EnsureDBEntry(currentKey)
+        d.conditions.item = d.conditions.item or {}
+        d.conditions.item.stacksComp = picked
         SafeRefresh(); SafeEvaluate()
     end)
 
@@ -3273,6 +3518,31 @@ end)
             _g = false
         end)
     end
+	
+	-- Item Stacks value
+    condFrame.cond_item_stacks_val:SetScript("OnEnterPressed", function()
+        if not currentKey then return end
+        local v = tonumber(this:GetText())
+        local d = EnsureDBEntry(currentKey)
+        d.conditions.item = d.conditions.item or {}
+        if not v then
+            this:SetText(tostring(d.conditions.item.stacksVal or 0))
+            return
+        end
+        if v < 0 then v = 0 end
+        d.conditions.item.stacksVal = v
+        SafeRefresh(); SafeEvaluate()
+        UpdateCondFrameForKey(currentKey)
+        if this.ClearFocus then this:ClearFocus() end
+    end)
+    do
+        local _g = false
+        condFrame.cond_item_stacks_val:SetScript("OnEditFocusLost", function()
+            if _g then return end; _g = true
+            this:GetScript("OnEnterPressed")()
+            _g = false
+        end)
+    end
 
     -- Item Remaining value (seconds)
     condFrame.cond_item_remaining_val:SetScript("OnEnterPressed", function()
@@ -3449,6 +3719,7 @@ end)
     condFrame.cond_aura_stacks_val_enter:Hide()
     condFrame.cond_aura_greyscale:Hide()
     condFrame.cond_aura_mine:Hide()
+	if condFrame.cond_aura_others then condFrame.cond_aura_others:Hide() end
     if condFrame.cond_aura_owner_tip then condFrame.cond_aura_owner_tip:Hide() end
     if condFrame.cond_aura_distanceDD   then condFrame.cond_aura_distanceDD:Hide()   end
     if condFrame.cond_aura_unitTypeDD   then condFrame.cond_aura_unitTypeDD:Hide()   end
@@ -3471,6 +3742,11 @@ end)
     condFrame.cond_item_power_comp:Hide()
     condFrame.cond_item_power_val:Hide()
     condFrame.cond_item_power_val_enter:Hide()
+	condFrame.cond_item_stacks_cb:Hide()
+    condFrame.cond_item_stacks_comp:Hide()
+    condFrame.cond_item_stacks_val:Hide()
+    condFrame.cond_item_stacks_val_enter:Hide()
+    condFrame.cond_item_text_stack:Hide()
     condFrame.cond_item_hp_my:Hide()
     condFrame.cond_item_hp_tgt:Hide()
     condFrame.cond_item_hp_comp:Hide()
@@ -5035,6 +5311,7 @@ local function UpdateConditionsUI(data)
         if condFrame.cond_item_unitTypeDD  then condFrame.cond_item_unitTypeDD:Hide()  end
 		
 		if condFrame.cond_aura_mine then condFrame.cond_aura_mine:Hide() end
+		if condFrame.cond_aura_others then condFrame.cond_aura_others:Hide() end
 		if condFrame.cond_aura_owner_tip then condFrame.cond_aura_owner_tip:Hide() end
         if condFrame.cond_item_where_equipped then condFrame.cond_item_where_equipped:Hide() end
         if condFrame.cond_item_where_bag then condFrame.cond_item_where_bag:Hide() end
@@ -5081,7 +5358,12 @@ local function UpdateConditionsUI(data)
         if condFrame.cond_aura_target_dead  then condFrame.cond_aura_target_dead:Hide()  end
         if condFrame.cond_item_target_alive then condFrame.cond_item_target_alive:Hide() end
         if condFrame.cond_item_target_dead  then condFrame.cond_item_target_dead:Hide()  end
-
+		        -- hide Item stacks row when not editing an item
+        if condFrame.cond_item_stacks_cb then condFrame.cond_item_stacks_cb:Hide() end
+        if condFrame.cond_item_text_stack then condFrame.cond_item_text_stack:Hide() end
+        if condFrame.cond_item_stacks_comp then condFrame.cond_item_stacks_comp:Hide() end
+        if condFrame.cond_item_stacks_val then condFrame.cond_item_stacks_val:Hide() end
+        if condFrame.cond_item_stacks_val_enter then condFrame.cond_item_stacks_val_enter:Hide() end
 
     -- ITEM
     elseif data.type == "Item" then
@@ -5096,6 +5378,10 @@ local function UpdateConditionsUI(data)
 
         local ic = c.item or {}
 
+        if UpdateItemStacksForMissing then
+            UpdateItemStacksForMissing()
+        end
+		
         local function _enCheck(cb)
             if not cb then return end
             cb:Enable()
@@ -5327,6 +5613,69 @@ local function UpdateConditionsUI(data)
             if ic.textTimeRemaining then ic.textTimeRemaining = false end
             condFrame.cond_item_text_time:SetChecked(false)
             _disCheck(condFrame.cond_item_text_time)
+        end
+
+        -- ITEM STACKS row (Item stacks + text stack counter)
+        do
+            local stacksOn   = (ic.stacksEnabled == true)
+            local textStacks = (ic.textStackCounter == true)
+
+            -- Always show the two checkboxes for any Item-type entry
+            condFrame.cond_item_stacks_cb:Show()
+            condFrame.cond_item_text_stack:Show()
+
+            if isMissing then
+                condFrame.cond_item_stacks_cb:SetChecked(false)
+                condFrame.cond_item_text_stack:SetChecked(false)
+
+                _disCheck(condFrame.cond_item_stacks_cb)
+                _disCheck(condFrame.cond_item_text_stack)
+
+                if condFrame.cond_item_stacks_comp then
+                    condFrame.cond_item_stacks_comp:Hide()
+                end
+                if condFrame.cond_item_stacks_val then
+                    condFrame.cond_item_stacks_val:Hide()
+                end
+                if condFrame.cond_item_stacks_val_enter then
+                    condFrame.cond_item_stacks_val_enter:Hide()
+                end
+            else
+                _enCheck(condFrame.cond_item_stacks_cb)
+                _enCheck(condFrame.cond_item_text_stack)
+
+                condFrame.cond_item_stacks_cb:SetChecked(stacksOn)
+                condFrame.cond_item_text_stack:SetChecked(textStacks)
+
+                if stacksOn then
+                    if condFrame.cond_item_stacks_comp then
+                        condFrame.cond_item_stacks_comp:Show()
+                    end
+                    if condFrame.cond_item_stacks_val then
+                        condFrame.cond_item_stacks_val:Show()
+                    end
+                    if condFrame.cond_item_stacks_val_enter then
+                        condFrame.cond_item_stacks_val_enter:Show()
+                    end
+
+                    local comp = ic.stacksComp or ""
+                    UIDropDownMenu_SetSelectedValue(condFrame.cond_item_stacks_comp, comp)
+                    UIDropDownMenu_SetText(comp, condFrame.cond_item_stacks_comp)
+                    _GoldifyDD(condFrame.cond_item_stacks_comp)
+
+                    condFrame.cond_item_stacks_val:SetText(tostring(ic.stacksVal or 0))
+                else
+                    if condFrame.cond_item_stacks_comp then
+                        condFrame.cond_item_stacks_comp:Hide()
+                    end
+                    if condFrame.cond_item_stacks_val then
+                        condFrame.cond_item_stacks_val:Hide()
+                    end
+                    if condFrame.cond_item_stacks_val_enter then
+                        condFrame.cond_item_stacks_val_enter:Hide()
+                    end
+                end
+            end
         end
 
         -- RESOURCE
@@ -5600,6 +5949,7 @@ local function UpdateConditionsUI(data)
         if condFrame.cond_ability_unitTypeDD  then condFrame.cond_ability_unitTypeDD:Hide()  end
 
 		condFrame.cond_aura_mine:Hide()
+		condFrame.cond_aura_others:Hide()
 		if condFrame.cond_aura_owner_tip then condFrame.cond_aura_owner_tip:Hide() end
 		if condFrame.cond_aura_tip then condFrame.cond_aura_tip:Hide() end
         if condFrame.cond_aura_formDD then condFrame.cond_aura_formDD:Hide() end
@@ -5638,6 +5988,7 @@ local function UpdateConditionsUI(data)
         condFrame.cond_aura_found:Show()
         condFrame.cond_aura_missing:Show()
         if condFrame.cond_aura_tip then condFrame.cond_aura_tip:Show() end
+		if condFrame.cond_aura_owner_tip then condFrame.cond_aura_owner_tip:Show() end
         condFrame.cond_aura_incombat:Show()
         condFrame.cond_aura_outcombat:Show()
         condFrame.cond_aura_target_help:Show()
@@ -5751,7 +6102,6 @@ local function UpdateConditionsUI(data)
         condFrame.cond_aura_glow:SetChecked((c.aura and c.aura.glow) or false)
         condFrame.cond_aura_greyscale:SetChecked((c.aura and c.aura.greyscale) or false)
 
-        local hasCursive = _HasCursive()
         local isBuff     = (data.type == "Buff")
 
         -- Combo points / class-specific note / weapon filter
@@ -5829,71 +6179,77 @@ local function UpdateConditionsUI(data)
             condFrame.cond_aura_hp_val_enter:Hide()
         end
 
-        -- Row 7: Aura owner flag ("My Aura" only)
-        local onlyMine = (c.aura and c.aura.onlyMine) and true or false
+		-- Aura owner flags ("My Aura" / "Others Aura") – buff and debuff identical.
+		local onlyMine   = (c.aura and c.aura.onlyMine)   and true or false
+		local onlyOthers = (c.aura and c.aura.onlyOthers) and true or false
 
-        if amode == "found" then
-            condFrame.cond_aura_mine:Show()
+		-- Sanitize DB: if both are somehow true, keep "My Aura" only.
+		if onlyMine and onlyOthers then
+			onlyOthers = false
+			if c.aura then
+				c.aura.onlyOthers = nil
+			end
+		end
 
-            if isBuff then
-                -- BUFF: cannot reliably track “My Aura” → always off + grey, hint
-                condFrame.cond_aura_mine:SetChecked(false)
-                _disableCheck(condFrame.cond_aura_mine)
-                if c.aura then c.aura.onlyMine = nil end
+		if amode == "found" then
+			-- Owner row visible and enabled for ALL aura types, on ANY target (self/help/harm).
+			if condFrame.cond_aura_mine then
+				condFrame.cond_aura_mine:Show()
+				if condFrame.cond_aura_mine.Enable then condFrame.cond_aura_mine:Enable() end
+				condFrame.cond_aura_mine:SetChecked(onlyMine)
+				if condFrame.cond_aura_mine.text and condFrame.cond_aura_mine.text.SetTextColor then
+					condFrame.cond_aura_mine.text:SetTextColor(1, 0.82, 0)
+				end
+			end
 
-                if condFrame.cond_aura_owner_tip then
-                    condFrame.cond_aura_owner_tip:SetText("(not able to track for buffs)")
-                    condFrame.cond_aura_owner_tip:Show()
-                end
+			if condFrame.cond_aura_others then
+				condFrame.cond_aura_others:Show()
+				if condFrame.cond_aura_others.Enable then condFrame.cond_aura_others:Enable() end
+				condFrame.cond_aura_others:SetChecked(onlyOthers)
+				if condFrame.cond_aura_others.text and condFrame.cond_aura_others.text.SetTextColor then
+					condFrame.cond_aura_others.text:SetTextColor(1, 0.82, 0)
+				end
+			end
 
-            elseif isSelfOnly then
-                -- On Player (self): caster filter is meaningless -> always off & grey.
-                condFrame.cond_aura_mine:SetChecked(false)
-                _disableCheck(condFrame.cond_aura_mine)
-                if c.aura then c.aura.onlyMine = nil end
+		elseif amode == "missing" then
+			-- Missing: keep row visible but disable + clear flags.
+			if condFrame.cond_aura_mine then
+				condFrame.cond_aura_mine:Show()
+				if condFrame.cond_aura_mine.Disable then condFrame.cond_aura_mine:Disable() end
+				condFrame.cond_aura_mine:SetChecked(false)
+				if condFrame.cond_aura_mine.text and condFrame.cond_aura_mine.text.SetTextColor then
+					condFrame.cond_aura_mine.text:SetTextColor(0.6, 0.6, 0.6)
+				end
+			end
 
-                if condFrame.cond_aura_owner_tip then
-                    condFrame.cond_aura_owner_tip:SetText("(not used for On Player (self) as target)")
-                    condFrame.cond_aura_owner_tip:Show()
-                end
+			if condFrame.cond_aura_others then
+				condFrame.cond_aura_others:Show()
+				if condFrame.cond_aura_others.Disable then condFrame.cond_aura_others:Disable() end
+				condFrame.cond_aura_others:SetChecked(false)
+				if condFrame.cond_aura_others.text and condFrame.cond_aura_others.text.SetTextColor then
+					condFrame.cond_aura_others.text:SetTextColor(0.6, 0.6, 0.6)
+				end
+			end
 
-            else
-                -- Help/Harm targets: need Cursive to know who cast the aura
-                if hasCursive then
-                    _enableCheck(condFrame.cond_aura_mine)
-                    condFrame.cond_aura_mine:SetChecked(onlyMine)
+			if c.aura then
+				c.aura.onlyMine   = nil
+				c.aura.onlyOthers = nil
+			end
 
-                    if condFrame.cond_aura_owner_tip then
-                        condFrame.cond_aura_owner_tip:SetText("(require Cursive addon)")
-                        condFrame.cond_aura_owner_tip:Hide()
-                    end
-                else
-                    _disableCheck(condFrame.cond_aura_mine)
-                    condFrame.cond_aura_mine:SetChecked(false)
-                    if c.aura then c.aura.onlyMine = nil end
+		else
+			-- No aura mode selected → hide owner controls.
+			if condFrame.cond_aura_mine then
+				condFrame.cond_aura_mine:Hide()
+			end
+			if condFrame.cond_aura_others then
+				condFrame.cond_aura_others:Hide()
+			end
+		end
 
-                    if condFrame.cond_aura_owner_tip then
-                        condFrame.cond_aura_owner_tip:SetText("(require Cursive addon)")
-                        condFrame.cond_aura_owner_tip:Show()
-                    end
-                end
-            end
-
-        elseif amode == "missing" then
-            -- Aura missing: keep row visible but force it off and greyed
-            condFrame.cond_aura_mine:Show()
-            _disableCheck(condFrame.cond_aura_mine)
-            condFrame.cond_aura_mine:SetChecked(false)
-            if c.aura then c.aura.onlyMine = nil end
-            if condFrame.cond_aura_owner_tip then
-                condFrame.cond_aura_owner_tip:Hide()
-            end
-        else
-            condFrame.cond_aura_mine:Hide()
-            if condFrame.cond_aura_owner_tip then
-                condFrame.cond_aura_owner_tip:Hide()
-            end
-        end
+		-- After setting the owner flags from DB, update Remaining/Text grey state.
+		if AuraOwner_UpdateDependentChecks then
+			AuraOwner_UpdateDependentChecks()
+		end
 
         -- Row 10: Text flags (Text: stack + Text: remaining)
         if amode == "found" then
@@ -5902,7 +6258,7 @@ local function UpdateConditionsUI(data)
             _enableCheck(condFrame.cond_aura_text_stack)
             condFrame.cond_aura_text_stack:SetChecked((c.aura and c.aura.textStackCounter) or false)
 
-            -- === Text: Time remaining (same rules as before) ===
+            -- === Text: Time remaining ===
             condFrame.cond_aura_text_time:Show()
 
             if isSelfOnly then
@@ -5911,26 +6267,17 @@ local function UpdateConditionsUI(data)
                 condFrame.cond_aura_text_time:SetChecked((c.aura and c.aura.textTimeRemaining) or false)
 
             elseif isHelpOrHarm then
-                if not hasCursive then
-                    -- No Cursive: cannot show a reliable timer
-                    _disableCheck(condFrame.cond_aura_text_time)
-                    condFrame.cond_aura_text_time:SetChecked(false)
+                if onlyMine then
+                    -- My Aura checked -> user controls Text: Remaining
+                    _enableCheck(condFrame.cond_aura_text_time)
+                    condFrame.cond_aura_text_time:SetChecked((c.aura and c.aura.textTimeRemaining) or false)
+                else
+                    -- My Aura NOT checked -> Text: Remaining forced OFF and greyed
                     if c.aura and c.aura.textTimeRemaining then
                         c.aura.textTimeRemaining = false
                     end
-                else
-                    if onlyMine then
-                        -- My Aura checked -> user controls Text: Remaining
-                        _enableCheck(condFrame.cond_aura_text_time)
-                        condFrame.cond_aura_text_time:SetChecked((c.aura and c.aura.textTimeRemaining) or false)
-                    else
-                        -- My Aura NOT checked -> Text: Remaining forced OFF and greyed
-                        if c.aura and c.aura.textTimeRemaining then
-                            c.aura.textTimeRemaining = false
-                        end
-                        condFrame.cond_aura_text_time:SetChecked(false)
-                        _disableCheck(condFrame.cond_aura_text_time)
-                    end
+                    condFrame.cond_aura_text_time:SetChecked(false)
+                    _disableCheck(condFrame.cond_aura_text_time)
                 end
             else
                 -- Fallback: disable
@@ -5940,7 +6287,7 @@ local function UpdateConditionsUI(data)
                     c.aura.textTimeRemaining = false
                 end
             end
-
+			
         elseif amode == "missing" then
             -- Aura missing: keep text options visible but disabled and cleared
             condFrame.cond_aura_text_stack:Show()
@@ -6010,6 +6357,7 @@ local function UpdateConditionsUI(data)
         end
 
         -- Remaining (Row 8): behavior depends on target + "My Aura"
+        -- Remaining (Row 8): behavior depends on target + "My Aura"
         local aRemEnabled = (c.aura and c.aura.remainingEnabled) and true or false
 
         if amode == "found" then
@@ -6019,36 +6367,24 @@ local function UpdateConditionsUI(data)
             end
 
             if isSelfOnly then
-                -- On Player (self): user can freely toggle Remaining, no Cursive required
+                -- On Player (self): user can freely toggle Remaining
                 _enableCheck(condFrame.cond_aura_remaining_cb)
                 condFrame.cond_aura_remaining_cb:SetChecked(aRemEnabled)
 
             elseif isHelpOrHarm then
-                -- Help/Harm target
-                if not hasCursive then
-                    -- No Cursive: cannot actually time remote auras
-                    _disableCheck(condFrame.cond_aura_remaining_cb)
-                    condFrame.cond_aura_remaining_cb:SetChecked(false)
-                    if c.aura then c.aura.remainingEnabled = false end
-                    if condFrame.cond_aura_remaining_cb.text then
-                        condFrame.cond_aura_remaining_cb.text:SetText("Remaining (Requires Cursive addon + SuperWoW)")
-                    end
-                    _hideRemInputs()
+                -- Help/Harm target: apply My Aura rules
+                if onlyMine then
+                    -- My Aura checked -> user controls Remaining
+                    _enableCheck(condFrame.cond_aura_remaining_cb)
+                    condFrame.cond_aura_remaining_cb:SetChecked(aRemEnabled)
                 else
-                    -- Cursive; apply My Aura rules
-                    if onlyMine then
-                        -- My Aura checked -> user controls Remaining
-                        _enableCheck(condFrame.cond_aura_remaining_cb)
-                        condFrame.cond_aura_remaining_cb:SetChecked(aRemEnabled)
-                    else
-                        -- My Aura NOT checked -> Remaining disabled and cleared
-                        if c.aura and c.aura.remainingEnabled then
-                            c.aura.remainingEnabled = false
-                        end
-                        aRemEnabled = false
-                        condFrame.cond_aura_remaining_cb:SetChecked(false)
-                        _disableCheck(condFrame.cond_aura_remaining_cb)
+                    -- My Aura NOT checked -> Remaining disabled and cleared
+                    if c.aura and c.aura.remainingEnabled then
+                        c.aura.remainingEnabled = false
                     end
+                    aRemEnabled = false
+                    condFrame.cond_aura_remaining_cb:SetChecked(false)
+                    _disableCheck(condFrame.cond_aura_remaining_cb)
                 end
             else
                 -- Fallback: disable
@@ -6210,6 +6546,12 @@ local function UpdateConditionsUI(data)
 		if condFrame.cond_item_target_alive then condFrame.cond_item_target_alive:Hide() end
         if condFrame.cond_item_target_dead  then condFrame.cond_item_target_dead:Hide()  end
 		if condFrame.cond_item_weaponDD then condFrame.cond_item_weaponDD:Hide() end
+		        -- hide Item stacks row when not editing an item
+        if condFrame.cond_item_stacks_cb then condFrame.cond_item_stacks_cb:Hide() end
+        if condFrame.cond_item_text_stack then condFrame.cond_item_text_stack:Hide() end
+        if condFrame.cond_item_stacks_comp then condFrame.cond_item_stacks_comp:Hide() end
+        if condFrame.cond_item_stacks_val then condFrame.cond_item_stacks_val:Hide() end
+        if condFrame.cond_item_stacks_val_enter then condFrame.cond_item_stacks_val_enter:Hide() end
 
         -- hide ability DDs when not editing an ability
         if condFrame.cond_ability_distanceDD  then condFrame.cond_ability_distanceDD:Hide()  end
