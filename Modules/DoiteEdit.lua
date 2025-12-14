@@ -6357,7 +6357,6 @@ local function UpdateConditionsUI(data)
         end
 
         -- Remaining (Row 8): behavior depends on target + "My Aura"
-        -- Remaining (Row 8): behavior depends on target + "My Aura"
         local aRemEnabled = (c.aura and c.aura.remainingEnabled) and true or false
 
         if amode == "found" then

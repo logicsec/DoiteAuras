@@ -1520,79 +1520,82 @@ local function _PlayerAuraRemainingSeconds(auraName)
     return nil
 end
 
--- === Cursive integration: curse ownership + remaining time ===
-local function _HasCursive()
-    return (Cursive and Cursive.curses
-            and Cursive.curses.GetCurseData
-            and Cursive.curses.TimeRemaining) and true or false
+-- === DoiteTrack-powered aura ownership + remaining time ===
+
+-- Returns: remSeconds or nil, isRecording, spellId or nil, isMine, isOther, mineKnown
+local function _DoiteTrackAuraOwnership(spellName, unit)
+    if not DoiteTrack or not spellName or not unit then
+        return nil, false, nil, false, false, false
+    end
+
+    local rem, recording, sid = nil, false, nil
+    if DoiteTrack.GetAuraRemainingOrRecordingByName then
+        rem, recording, sid = DoiteTrack:GetAuraRemainingOrRecordingByName(spellName, unit)
+        if rem and rem <= 0 then
+            rem = nil
+        end
+    end
+
+    local mine, mineKnown = false, false
+    if DoiteTrack.IsAuraMineByName then
+        local isMineRaw = DoiteTrack:IsAuraMineByName(spellName, unit)
+        if isMineRaw ~= nil then
+            mine      = (isMineRaw == true)
+            mineKnown = true
+        end
+    end
+
+    local isOther = false
+    if mineKnown and not mine then
+        isOther = true
+    end
+
+    return rem, recording, sid, mine, isOther, mineKnown
 end
 
-_GetUnitGuid = function(unit)
-    if not unit or type(UnitExists) ~= "function" then
+
+-- Unified remaining-time provider used by existing call sites (DoiteTrack only).
+local function _DoiteTrackAuraRemainingSeconds(spellName, unit)
+    if not DoiteTrack or not spellName or not unit then
         return nil
     end
 
-    -- UnitExists(unit) returns existsFlag, guid
-    local exists, guid = UnitExists(unit)
-    if exists and guid and guid ~= "" then
-        return guid
+    if DoiteTrack.GetAuraRemainingSecondsByName then
+        local rem = DoiteTrack:GetAuraRemainingSecondsByName(spellName, unit)
+        if rem and rem > 0 then
+            return rem
+        end
     end
 
-    -- Other clients where UnitExists doesn't return a GUID but UnitGUID exists
-    if type(UnitGUID) == "function" then
-        local g = UnitGUID(unit)
-        if g and g ~= "" then
-            return g
+    -- Optional: also honor recordings if exposed via GetAuraRemainingOrRecordingByName
+    if DoiteTrack.GetAuraRemainingOrRecordingByName then
+        local rem2 = _DoiteTrackAuraOwnership(spellName, unit)
+        if rem2 and rem2 > 0 then
+            return rem2
         end
     end
 
     return nil
 end
 
-local function _CursiveGetCurseData(spellName, unit)
-    if not spellName or not _HasCursive() then return nil end
-    local guid = _GetUnitGuid(unit)
-    if not guid then return nil end
-
-    -- Try name as-is first, then lowercase (API wants lowercase key)
-    local data = Cursive.curses:GetCurseData(spellName, guid)
-    if not data then
-        data = Cursive.curses:GetCurseData(string.lower(spellName), guid)
+-- Use DoiteTrack to evaluate a remaining-time comparison on a unit.
+local function _DoiteTrackRemainingPass(spellName, unit, comp, threshold)
+    if not DoiteTrack or not spellName or not unit or not comp or threshold == nil then
+        return nil
     end
-    return data
-end
 
-local function _CursiveAuraRemainingSeconds(spellName, unit)
-    local data = _CursiveGetCurseData(spellName, unit)
-    if not data then return nil end
+    if DoiteTrack.RemainingPassesByName then
+        -- Add-on helper handles comparison internally
+        return DoiteTrack:RemainingPassesByName(spellName, unit, comp, threshold)
+    end
 
-    local rem = Cursive.curses:TimeRemaining(data)
+    -- Fallback within DoiteTrack: if no helper, compare using numeric remaining
+    local rem = _DoiteTrackAuraRemainingSeconds(spellName, unit)
     if rem and rem > 0 then
-        return rem
+        return _RemainingPasses(rem, comp, threshold)
     end
+
     return nil
-end
-
--- Use Cursive: to evaluate a remaining-time comparison on a unit.
-local function _CursiveRemainingPass(spellName, unit, comp, threshold)
-    if not spellName or not unit or not comp or threshold == nil then
-        return nil
-    end
-    if not _HasCursive() then
-        return nil
-    end
-
-    local data = _CursiveGetCurseData(spellName, unit)
-    if not data then
-        return nil
-    end
-
-    local rem = Cursive.curses:TimeRemaining(data)
-    if not rem or rem <= 0 then
-        return nil
-    end
-
-    return _RemainingPasses(rem, comp, threshold)
 end
 
 -- For debuff checks only: if all debuff slots are full and the name exists in buffs, treat it as a debuff hit
@@ -1980,7 +1983,6 @@ end
 -- Spells whose IsSpellInRange return values are unreliable; treat them as explicit melee or ranged for distance checks instead of trusting API.
 local _SpellRangeOverrideByClass = {
     WARRIOR = {
-        -- These always report 1 from IsSpellInRange() in your tests.
         ["Heroic Strike"] = "melee",
         ["Cleave"]        = "melee",
         -- Add more warrior spells here if needed.
@@ -2835,7 +2837,7 @@ local function _EnsureAuraTexture(frame, data)
         return
     end
 
-    -- 2) Existing live aura + spellbook scan (your old code)
+    -- 2) Existing live aura + spellbook scan
     local tgt = c.target or (c.targetSelf and "self") or (c.targetTarget and "target") or "self"
     local checkSelf, checkTarget = false, false
     if tgt == "self" then
@@ -3819,11 +3821,15 @@ local function CheckAuraConditions(data)
     end
 	
     local ownerFilter = nil
-    local onlyMine = (wantDebuff and c.onlyMine == true) or false
+    local wantMine   = (c.onlyMine   == true)
+    local wantOthers = (c.onlyOthers == true)
 
-    -- Only activate ownership logic when explicitly looking at a real target.
-    if onlyMine and (not allowSelf) and (allowHelp or allowHarm) then
+    if wantMine and not wantOthers then
         ownerFilter = "mine"
+    elseif wantOthers and not wantMine then
+        ownerFilter = "others"
+    else
+        ownerFilter = nil
     end
 
     -- === Target gating (OR semantics for help/harm) ===
@@ -3950,29 +3956,28 @@ local function CheckAuraConditions(data)
         end
     end
 
-    -- === Cursive aura owner filter ("My Aura" / "Others Aura") ===
-    if found and ownerFilter and _HasCursive() then
-        local ownerUnit = nil
-        if (not allowSelf) and (allowHelp or allowHarm) then
-            ownerUnit = "target"
-        end
+    -- === DoiteTrack aura owner filter ("My Aura" / "Others Aura") ===
+	if found and ownerFilter and DoiteTrack then
+		local ownerUnit = nil
 
-        if ownerUnit then
-            local dataCurse = _CursiveGetCurseData(name, ownerUnit)
-            if dataCurse and dataCurse.currentPlayer ~= nil then
-                local isMine = (dataCurse.currentPlayer == true)
-                if ownerFilter == "mine" and not isMine then
-                    found = false
-                elseif ownerFilter == "others" and isMine then
-                    found = false
-                end
-            else
-                if ownerFilter == "mine" then
-                    found = false
-                end
-            end
-        end
-    end
+		if allowSelf then
+			ownerUnit = "player"
+		elseif (allowHelp or allowHarm) and UnitExists("target") then
+			ownerUnit = "target"
+		end
+
+		if ownerUnit then
+			local _, _, _, isMine, isOther, mineKnown = _DoiteTrackAuraOwnership(name, ownerUnit)
+
+			if mineKnown then
+				if ownerFilter == "mine" and not isMine then
+					found = false
+				elseif ownerFilter == "others" and not isOther then
+					found = false
+				end
+			end
+		end
+	end
 
     -- Decide show based on mode first
     local show
@@ -4120,23 +4125,25 @@ local function CheckAuraConditions(data)
                 local pass = true
 
                 if unitForRem == "player" then
-                    -- Only use the real player aura API here.
+                    -- Self: never rely on DoiteTrack for the numeric remaining, just use the real player aura API.
                     local rem = _PlayerAuraRemainingSeconds(name)
                     if rem and rem > 0 then
                         pass = _RemainingPasses(rem, comp, threshold)
                     else
-                        -- No timer info: do NOT kill the icon on that basis.
+
                         pass = true
                     end
                 else
-                    if ownerFilter == "mine" and _HasCursive() then
-                        local rpass = _CursiveRemainingPass(name, unitForRem, comp, threshold)
+
+                    if ownerFilter == "mine" and DoiteTrack then
+                        local rpass = _DoiteTrackRemainingPass(name, unitForRem, comp, threshold)
                         if rpass == false then
                             pass = false
                         else
                             pass = true
                         end
                     else
+                        -- No target-based remaining gating in all other cases
                         pass = true
                     end
                 end
@@ -4456,7 +4463,7 @@ local function _Doite_UpdateOverlayForFrame(frame, key, dataTbl, slideActive)
             end
 			
         ----------------------------------------------------------------
-        -- Aura remaining-time text (player via cached timers, target via Cursive)
+        -- Aura remaining-time text
         ----------------------------------------------------------------
         elseif (dataTbl.type == "Buff" or dataTbl.type == "Debuff")
            and dataTbl.conditions
@@ -4506,14 +4513,14 @@ local function _Doite_UpdateOverlayForFrame(frame, key, dataTbl, slideActive)
                 if unitForRem == "player" then
                     rem = _PlayerAuraRemainingSeconds(auraName)
                 elseif unitForRem == "target" then
-                    -- Only use Cursive for target-harm debuffs owned by the player.
-                    if dataTbl.type == "Debuff" and ca.targetHarm == true then
-                        rem = _CursiveAuraRemainingSeconds(auraName, "target")
+
+                    if DoiteTrack and ca.onlyMine == true then
+                        rem = _DoiteTrackAuraRemainingSeconds(auraName, "target")
                     else
                         rem = nil
                     end
                 end
-
+				
                 if rem and rem > 0 then
                     remText = _FmtRem(rem)
                     wantRem = (remText ~= nil)
