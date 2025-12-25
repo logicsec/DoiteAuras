@@ -206,10 +206,13 @@ _editTick:SetScript("OnUpdate", function()
         return
     end
 
-    _editAccum = _editAccum + (arg1 or 0)
-    if _editAccum < DOITE_EDIT_TICK then
-        return
-    end
+	_editAccum = _editAccum + (arg1 or 0)
+	if _editAccum < DOITE_EDIT_TICK then return end
+	_editAccum = 0
+
+	-- skip if editor hidden or zero visible icons
+	local f = _G["DoiteEdit_Frame"]
+	if not (f and f:IsShown()) then return end
     _editAccum = 0
 
     -- Force the normal pipeline to run even when the player is idle.
@@ -319,14 +322,24 @@ local function _PoolPushList(lst)
 end
 
 local function _GetTrackedByName()
-    local now = GetTime()
+	local now = GetTime()
 
-    -- While editing, rebuild much more aggressively so new aura icons start tracking immediately (prevents “buffs feel slow” in editor).
-    local ttl = _IsAnyKeyUnderEdit() and 0.25 or 5.0
+	-- While editing, rebuild more aggressively.
+	local ttl = _IsAnyKeyUnderEdit() and 0.25 or 5.0
 
-    if _trackedByName and (now - _trackedBuiltAt) < ttl then
-        return _trackedByName
-    end
+	local dbSize = 0
+	if DoiteAurasDB and DoiteAurasDB.spells then
+		for _ in pairs(DoiteAurasDB.spells) do
+			dbSize = dbSize + 1
+		end
+	end
+
+	local builtAt = _trackedBuiltAt or 0
+	local cachedSize = _trackedByName and _trackedByName._dbSize or nil
+
+	if _trackedByName and (now - builtAt) < ttl and cachedSize == dbSize then
+		return _trackedByName
+	end
 
     local t = _trackedByName
     if not t then
@@ -362,6 +375,7 @@ local function _GetTrackedByName()
     end
 
     _trackedByName, _trackedBuiltAt = t, now
+	t._dbSize = dbSize
     return t
 end
 
@@ -515,9 +529,22 @@ local function _ScanUnitAuras(unit)
 
 	local snap = auraSnapshot[unit]
 	if not snap then return end
+
+	local prevBuffs, prevDebuffs = snap.buffCount or 0, snap.debuffCount or 0
+
+	-- UnitBuff/UnitDebuff: grabbing only first return (texture) is intentional here.
+	local curBuffTex   = UnitBuff(unit, 1)
+	local curDebuffTex = UnitDebuff(unit, 1)
+
+	-- If previously there were no auras and there still are none, skip the scan.
+	if (not curBuffTex and prevBuffs == 0) and (not curDebuffTex and prevDebuffs == 0) then
+		return
+	end
+
 	local buffs,   debuffs   = snap.buffs,   snap.debuffs
 	local buffIds, debuffIds = snap.buffIds, snap.debuffIds
 	if not buffs or not debuffs then return end
+
 	
 	-- Track how many slots are actually occupied
     local buffCount   = 0
@@ -1632,9 +1659,19 @@ local function _CL_Parse(msg)
 		----------------------------------------------------------------
 		if cls == "ROGUE" then
 			local dodged = false
-			if str_find(msg, " dodges") then
-				if str_find(msg, "You attack%.") or str_find(msg, "^Your%s+") then
+
+			-- Match:
+			-- "You attack. <Target> dodges"
+			-- "Your <something> was dodged by <Target>"
+			do
+				local _, _, t1 = str_find(msg, "You attack%.%s+(.+)%s+dodges")
+				if t1 then
 					dodged = true
+				else
+					local _, _, t2 = str_find(msg, "Your%s+.+%s+was%s+dodged%s+by%s+(.+)")
+					if t2 then
+						dodged = true
+					end
 				end
 			end
 
@@ -1651,8 +1688,15 @@ local function _CL_Parse(msg)
 		-- MAGE: Arcane Surge (one of the spells partially/fully resisted)
 		----------------------------------------------------------------
 		if cls == "MAGE" then
-			-- Matches both "was resisted by" and "(xx resisted)" style lines.
-			if str_find(msg, " was resisted") or str_find(msg, " resisted%)") or str_find(msg, " resisted by") then
+			-- Match:
+			-- "Your <Spell> was resisted by <Target>"
+			-- "<Target> resists your <Spell>"
+			-- "Your <Spell> hits <Target> for X. (Y resisted)"
+			if str_find(msg, " was resisted") 
+			   or str_find(msg, " resisted%)")
+			   or str_find(msg, " resisted by")
+			   or str_find(msg, " resists your ") then
+
 				local dur = _ProcWindowDuration("Arcane Surge")
 				if dur then
 					_ProcWindowSet("Arcane Surge", now + dur)
@@ -5387,10 +5431,21 @@ local function _HandleAbilitySlider(key, ca, dataTbl)
 
 
     -- Start only when this cooldown really belongs to this spell, but allow short CDs (GCD-only) as long as they're from this spell.
-    local shouldStart    = hasSeenForThisCD and rem and dur and rem > 0 and rem <= maxWindow
+    local shouldStart = hasSeenForThisCD and rem and dur and rem > 0 and rem <= maxWindow
 
-    -- Once sliding, continue as long as there is any remaining cooldown; this lets the slider follow extra GCD applied by other spells.
-    local shouldContinue = wasSliding and rem and rem > 0
+    -- Once sliding, ONLY keep the slide alive while within the slide window.
+    local contLimit = maxWindow
+
+    -- If maxWindow is very small (short CDs / GCD-ish), allow up to GCD range - don't kill the slide on tiny bumps.
+    if contLimit < 1.60 then
+        contLimit = 1.60
+    end
+
+    -- Small sampling jitter allowance.
+    contLimit = contLimit + 0.15
+
+    local shouldContinue = wasSliding and rem and rem > 0 and rem <= contLimit
+
 
     local startedSlide, stoppedSlide = false, false
 

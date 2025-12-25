@@ -125,21 +125,20 @@ local function ComputeGroupLayout(entries, groupName)
     local baseSize = num(L.iconSize, 36)
     local growth   = L.growth or "Horizontal Right"
     local limit    = num(L.numAuras, 5)
-    local spacing  = (DoiteAurasDB and DoiteAurasDB.settings and DoiteAurasDB.settings.spacing) or 8
+    local settings = (DoiteAurasDB and DoiteAurasDB.settings)
+	local spacing  = (settings and settings.spacing) or 8
     local pad      = baseSize + spacing
 
-		-- 2) Build the pool of items that are BOTH known and WANT to be shown (conditions OR sliding)
-    local visibleKnown = DoiteGroup._tmpVisibleKnown
-    if not visibleKnown then
-        visibleKnown = {}
-        DoiteGroup._tmpVisibleKnown = visibleKnown
-    else
-        local i = 1
-        while visibleKnown[i] ~= nil do
-            visibleKnown[i] = nil
-            i = i + 1
-        end
-    end
+		-- 2) Build the pool of items that are BOTH known and WANT to be shown (conditions OR sliding) - reuse & shrink table without realloc
+	local visibleKnown = DoiteGroup._tmpVisibleKnown
+	if not visibleKnown then
+		visibleKnown = {}
+		DoiteGroup._tmpVisibleKnown = visibleKnown
+	else
+		for i = table.getn(visibleKnown), 1, -1 do
+			visibleKnown[i] = nil
+		end
+	end
 
 	local editKey = editingKey()
     local vn = 0
@@ -178,7 +177,14 @@ local function ComputeGroupLayout(entries, groupName)
     end
 
     -- Decide how to sort this group: "prio" (default) or "time"
-    local sortMode = GetGroupSortMode(groupName)
+    local groupSortCache = DoiteGroup._sortCache or {}
+	DoiteGroup._sortCache = groupSortCache
+
+	local sortMode = groupSortCache[groupName]
+	if not sortMode then
+		sortMode = GetGroupSortMode(groupName)
+		groupSortCache[groupName] = sortMode
+	end
 
     -- Precompute cheap sort keys once per entry (avoids frame lookups/tostring churn inside comparator)
     local j = 1

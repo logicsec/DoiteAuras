@@ -1,6 +1,7 @@
 ---------------------------------------------------------------
 -- DoiteAuras.lua
 -- Simplified WeakAura-style addon for WoW
+-- Please respect license note: Ask permission
 -- WoW 1.12 | Lua 5.0
 ---------------------------------------------------------------
 
