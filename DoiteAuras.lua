@@ -1904,8 +1904,23 @@ local function RefreshIcons()
 
     local cache = DA_Cache()
 
+    -- Track which keys were processed this refresh, so removed icons (that previously visible) get hidden immediately.
+    local used = DoiteAuras._iconsUsed
+    if not used then
+        used = {}
+        DoiteAuras._iconsUsed = used
+    else
+        local k
+        for k in pairs(used) do
+            used[k] = nil
+        end
+    end
+
     for _, entry in ipairs(candidates) do
         local key, data = entry.key, entry.data
+        if key then
+            used[key] = true
+        end
 
         -- Prefer the local icons[] cache to avoid per-icon string concat + _G lookup
         local f = (icons and icons[key]) or nil
@@ -2008,6 +2023,22 @@ local function RefreshIcons()
             f:Hide()
         end
     end
+
+    -- If an icon was removed while visible, it may still exist in the local icons[] cache and would otherwise remain visible until /reload.
+    if icons and DoiteAurasDB and DoiteAurasDB.spells then
+        local used = DoiteAuras._iconsUsed
+        local k, f
+        for k, f in pairs(icons) do
+            if f and (not used or not used[k]) then
+                if not DoiteAurasDB.spells[k] then
+                    f:Hide()
+                    -- keep or drop the cache entry; dropping avoids table growth on add/remove churn
+                    icons[k] = nil
+                end
+            end
+        end
+    end
+
     _G["DoiteAuras_RefreshInProgress"] = false
 end
 
@@ -2016,24 +2047,30 @@ local function RefreshList()
     if DA_IsHardDisabled() then
         return
     end
-	local _, v
 
-    -- Hide old rows & headers
+    local _, v
+
+    -- Mark all existing row frames "unused" for this rebuild, and hide them.
     for _, v in pairs(spellButtons) do
-        if v.Hide then v:Hide() end
+        if v then
+            v._daInList = false
+            if v.Hide then v:Hide() end
+        end
     end
-    for _, v in pairs(groupHeaders or {}) do
-        if v.Hide then v:Hide() end
+
+    -- Hide all existing header frames (reuse by index)
+    local oldHeaderN = table.getn(groupHeaders)
+    local i
+    for i = 1, oldHeaderN do
+        local h = groupHeaders[i]
+        if h and h.Hide then h:Hide() end
     end
-    spellButtons = {}
-    groupHeaders = {}
 
     local ordered = GetOrderedSpells()
 
     -- Duplicate-info for "(i/N)" suffix based on name+type
     local groupCount = {}
     local groupIndex = {}
-    local i
 
     for i, entry in ipairs(ordered) do
         local d = entry.data
@@ -2044,11 +2081,10 @@ local function RefreshList()
         local d = entry.data
         local base = BaseKeyFor(d)
         groupIndex[base] = (groupIndex[base] or 0) + 1
-        entry._groupIdx = groupIndex[base]
-        entry._groupCnt = groupCount[base]
+        entry._groupCnt = groupCount[base] or 1
+        entry._groupIdx = groupIndex[base] or 1
     end
 
-    -- compute per-group priority (Prio 1,2,3,... inside each group)
     local groupMembers = {}
     for i, entry in ipairs(ordered) do
         local d = entry.data
@@ -2087,84 +2123,57 @@ local function RefreshList()
     -- running vertical offset (tighter spacing for headers)
     local yOffset = 0
 
+    local headerIndex = 0
+
     for _, entry in ipairs(displayList) do
         if entry.isHeader then
-            -- Group / Category / Ungrouped header row (visual container)
-            local hdr = CreateFrame("Frame", nil, listContent)
-            hdr:SetWidth(290); hdr:SetHeight(22)
+            headerIndex = headerIndex + 1
 
-            local bg = hdr:CreateTexture(nil, "BACKGROUND")
-            bg:SetAllPoints(hdr)
-            bg:SetTexture(1, 1, 1, 0.06)
+            -- Reuse header frame by index
+            local hdr = groupHeaders[headerIndex]
+            if not hdr then
+                hdr = CreateFrame("Frame", nil, listContent)
+                hdr:SetWidth(290); hdr:SetHeight(22)
 
-            -- Bigger font + uppercase text for group titles
-            hdr.label = hdr:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-            hdr.label:SetPoint("LEFT", hdr, "LEFT", 5, 0)
+                hdr.bg = hdr:CreateTexture(nil, "BACKGROUND")
+                hdr.bg:SetAllPoints(hdr)
+                hdr.bg:SetTexture(1, 1, 1, 0.06)
 
-            local hdrName = entry.groupName or ""
-            hdrName = string.upper(hdrName)
+                hdr.label = hdr:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+                hdr.label:SetPoint("LEFT", hdr, "LEFT", 5, 0)
 
-            hdr.label:SetText("|cffffffff" .. hdrName .. "|r")
-
-            -- Remember which logical group/category this header belongs to
-            hdr.groupName = entry.groupName
-            hdr.kind      = entry.kind  -- "group", "category" or "ungrouped"
-
-            ----------------------------------------------------------------
-            -- Shared "Disable" control (groups, categories, ungrouped)
-            ----------------------------------------------------------------
-            local bucketKey = DA_GetBucketKeyForHeaderEntry(entry)
-            hdr.bucketKey = bucketKey
-
-            if bucketKey then
-                -- Create the Disable checkbox on the far right
+                -- Disable checkbox (created once; shown/hidden per header)
                 hdr.disableCheck = CreateFrame("CheckButton", nil, hdr, "UICheckButtonTemplate")
                 hdr.disableCheck:SetWidth(14); hdr.disableCheck:SetHeight(14)
-                hdr.disableCheck:SetPoint("RIGHT", hdr, "RIGHT", -45, 0)
                 hdr.disableCheck:SetHitRectInsets(0, -40, 0, 0)
 
                 hdr.disableCheck.text = hdr:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
                 hdr.disableCheck.text:SetPoint("LEFT", hdr.disableCheck, "RIGHT", 2, 0)
                 hdr.disableCheck.text:SetText("Disable")
                 if hdr.disableCheck.text.SetTextColor then
-                    hdr.disableCheck.text:SetTextColor(0.7, 0.7, 0.7)  -- grey text, still checkable
+                    hdr.disableCheck.text:SetTextColor(0.7, 0.7, 0.7)
                 end
 
-                DoiteAurasDB.bucketDisabled = DoiteAurasDB.bucketDisabled or {}
-                hdr.disableCheck:SetChecked(DoiteAurasDB.bucketDisabled[bucketKey] == true)
-
-                local bk = bucketKey
                 hdr.disableCheck:SetScript("OnClick", function()
+                    local p = this:GetParent()
+                    local bk = p and p.bucketKey
+                    if not bk then return end
+
                     DoiteAurasDB.bucketDisabled = DoiteAurasDB.bucketDisabled or {}
                     if this:GetChecked() then
                         DoiteAurasDB.bucketDisabled[bk] = true
                     else
                         DoiteAurasDB.bucketDisabled[bk] = nil
                     end
+
                     if DoiteAuras_RefreshIcons then
                         pcall(DoiteAuras_RefreshIcons)
                     end
                 end)
-            end
 
-            ----------------------------------------------------------------
-            -- "Sort by: [Prio] [Time]" controls (only for real groups)
-            -- Anchored just to the left of the Disable checkbox if present.
-            ----------------------------------------------------------------
-            if entry.kind == "group" and entry.groupName and entry.groupName ~= "" then
-                local mode = DA_GetGroupSortMode(entry.groupName)  -- "prio" or "time"
-
-                local rightAnchor = hdr
-                local rightPointX = -45
-                if hdr.disableCheck then
-                    rightAnchor = hdr.disableCheck
-                    rightPointX = -30
-                end
-
-                -- Time checkbox (right-most among sort controls)
+                -- Sort controls (created once; shown only for group headers)
                 hdr.sortTime = CreateFrame("CheckButton", nil, hdr, "UICheckButtonTemplate")
                 hdr.sortTime:SetWidth(14); hdr.sortTime:SetHeight(14)
-                hdr.sortTime:SetPoint("RIGHT", rightAnchor, "LEFT", rightPointX, 0)
                 hdr.sortTime.text = hdr:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
                 hdr.sortTime.text:SetPoint("LEFT", hdr.sortTime, "RIGHT", 2, 0)
                 hdr.sortTime.text:SetText("Time")
@@ -2172,10 +2181,8 @@ local function RefreshList()
                     hdr.sortTime.text:SetTextColor(1, 1, 1)
                 end
 
-                -- Prio checkbox (to the left of Time)
                 hdr.sortPrio = CreateFrame("CheckButton", nil, hdr, "UICheckButtonTemplate")
                 hdr.sortPrio:SetWidth(14); hdr.sortPrio:SetHeight(14)
-                hdr.sortPrio:SetPoint("RIGHT", hdr.sortTime, "LEFT", -30, 0)
                 hdr.sortPrio.text = hdr:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
                 hdr.sortPrio.text:SetPoint("LEFT", hdr.sortPrio, "RIGHT", 2, 0)
                 hdr.sortPrio.text:SetText("Prio")
@@ -2183,299 +2190,319 @@ local function RefreshList()
                     hdr.sortPrio.text:SetTextColor(1, 1, 1)
                 end
 
-                -- "Sort by:" label to the left
-                hdr.sortLabel = hdr:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-                hdr.sortLabel:SetPoint("RIGHT", hdr.sortPrio, "LEFT", -5, 0)
-                hdr.sortLabel:SetText("Sort by:")
-                if hdr.sortLabel.SetTextColor then
-                    hdr.sortLabel:SetTextColor(1, 1, 1)
-                end
-
-                -- Initial state: exactly one checked
-                if mode == "time" then
-                    hdr.sortTime:SetChecked(true)
-                    hdr.sortPrio:SetChecked(false)
-                else
-                    hdr.sortPrio:SetChecked(true)
-                    hdr.sortTime:SetChecked(false)
-                end
-
-                -- Click handlers: mutually exclusive, always one checked
                 hdr.sortPrio:SetScript("OnClick", function()
-                    if not hdr.sortPrio:GetChecked() then
-                        hdr.sortPrio:SetChecked(true)
+                    local p = this:GetParent()
+                    if not p or not p.groupName or p.groupName == "" then
+                        this:SetChecked(true)
                         return
                     end
-                    hdr.sortPrio:SetChecked(true)
-                    hdr.sortTime:SetChecked(false)
-                    DoiteAurasDB.groupSort[hdr.groupName] = "prio"
+                    if not this:GetChecked() then
+                        this:SetChecked(true)
+                        return
+                    end
+                    this:SetChecked(true)
+                    if p.sortTime then p.sortTime:SetChecked(false) end
+                    DoiteAurasDB.groupSort = DoiteAurasDB.groupSort or {}
+                    DoiteAurasDB.groupSort[p.groupName] = "prio"
                     _G["DoiteGroup_NeedReflow"] = true
                 end)
 
                 hdr.sortTime:SetScript("OnClick", function()
-                    if not hdr.sortTime:GetChecked() then
-                        hdr.sortTime:SetChecked(true)
+                    local p = this:GetParent()
+                    if not p or not p.groupName or p.groupName == "" then
+                        this:SetChecked(true)
                         return
                     end
-                    hdr.sortTime:SetChecked(true)
-                    hdr.sortPrio:SetChecked(false)
-                    DoiteAurasDB.groupSort[hdr.groupName] = "time"
+                    if not this:GetChecked() then
+                        this:SetChecked(true)
+                        return
+                    end
+                    this:SetChecked(true)
+                    if p.sortPrio then p.sortPrio:SetChecked(false) end
+                    DoiteAurasDB.groupSort = DoiteAurasDB.groupSort or {}
+                    DoiteAurasDB.groupSort[p.groupName] = "time"
                     _G["DoiteGroup_NeedReflow"] = true
                 end)
+
+                hdr.sepTex = hdr:CreateTexture(nil, "ARTWORK")
+                hdr.sepTex:SetHeight(1)
+                hdr.sepTex:SetPoint("BOTTOMLEFT", hdr, "BOTTOMLEFT", 0, -2)
+                hdr.sepTex:SetPoint("BOTTOMRIGHT", hdr, "BOTTOMRIGHT", 0, -2)
+                hdr.sepTex:SetTexture(0.9, 0.9, 0.9, 0.12)
+
+                groupHeaders[headerIndex] = hdr
             end
-            ----------------------------------------------------------------
 
-            local sepTex = hdr:CreateTexture(nil, "ARTWORK")
-            sepTex:SetHeight(1)
-            sepTex:SetPoint("BOTTOMLEFT", hdr, "BOTTOMLEFT", 0, -2)
-            sepTex:SetPoint("BOTTOMRIGHT", hdr, "BOTTOMRIGHT", 0, -2)
-            sepTex:SetTexture(0.9, 0.9, 0.9, 0.16)
+            -- Update dynamic header text
+            hdr.groupName = entry.groupName or ""
+            local hdrName = string.upper(hdr.groupName or "")
+            hdr.label:SetText(hdrName)
 
+            -- Bucket key + disable toggle visibility/state
+            hdr.bucketKey = DA_GetBucketKeyForHeaderEntry(entry)
+            DoiteAurasDB.bucketDisabled = DoiteAurasDB.bucketDisabled or {}
+
+            if hdr.bucketKey then
+                hdr.disableCheck:ClearAllPoints()
+                hdr.disableCheck:SetPoint("RIGHT", hdr, "RIGHT", -45, 0)
+                hdr.disableCheck:Show()
+                hdr.disableCheck:SetChecked(DoiteAurasDB.bucketDisabled[hdr.bucketKey] == true)
+            else
+                hdr.disableCheck:Hide()
+            end
+
+            -- Group sort controls (only for group headers)
+            if entry.kind == "group" and hdr.groupName and hdr.groupName ~= "" then
+                local mode = DA_GetGroupSortMode(hdr.groupName)  -- "prio" or "time"
+
+                local rightAnchor = hdr
+                local rightPointX = -45
+                if hdr.disableCheck and hdr.disableCheck.IsShown and hdr.disableCheck:IsShown() then
+                    rightAnchor = hdr.disableCheck
+                    rightPointX = -30
+                end
+
+                hdr.sortTime:ClearAllPoints()
+                hdr.sortTime:SetPoint("RIGHT", rightAnchor, "LEFT", rightPointX, 0)
+
+                hdr.sortPrio:ClearAllPoints()
+                hdr.sortPrio:SetPoint("RIGHT", hdr.sortTime, "LEFT", -30, 0)
+
+                hdr.sortPrio:SetChecked(mode == "prio")
+                hdr.sortTime:SetChecked(mode == "time")
+
+                hdr.sortPrio:Show()
+                hdr.sortTime:Show()
+            else
+                hdr.sortPrio:Hide()
+                hdr.sortTime:Hide()
+            end
+
+            -- Position header
+            hdr:ClearAllPoints()
             hdr:SetPoint("TOPLEFT", listContent, "TOPLEFT", 0, yOffset)
-            yOffset = yOffset - 25   -- header height (22) + small gap
-
+            yOffset = yOffset - 25
             hdr:Show()
-            table.insert(groupHeaders, hdr)
 
         else
             local key, data = entry.key, entry.data
+            if key and data then
+                local display = data.displayName or key
+                -- show "(i/N)" only if N > 1 (duplicates of same name+type)
+                if entry._groupCnt and entry._groupCnt > 1 then
+                    display = string.format("%s (%d/%d)", display, entry._groupIdx, entry._groupCnt)
+                end
 
-            local display = data.displayName or key
-            -- show "(i/N)" only if N > 1 (duplicates of same name+type)
-            if entry._groupCnt and entry._groupCnt > 1 then
-                display = string.format("%s (%d/%d)", display, entry._groupIdx, entry._groupCnt)
-            end
+                -- Reuse per-key row frame
+                local btn = spellButtons[key]
+                if not btn then
+                    btn = CreateFrame("Frame", nil, listContent)
+                    btn:SetWidth(290); btn:SetHeight(50)
 
-            local btn = CreateFrame("Frame", nil, listContent)
-            btn:SetWidth(290); btn:SetHeight(50)
+                    btn.fontString = btn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+                    btn.fontString:SetPoint("TOPLEFT", btn, "TOPLEFT", 15, -2)
 
-            btn.fontString = btn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-            btn.fontString:SetPoint("TOPLEFT", btn, "TOPLEFT", 15, -2)
-            btn.fontString:SetText(display)
+                    btn.tag = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+                    btn.tag:SetPoint("TOPLEFT", btn.fontString, "BOTTOMLEFT", 0, -2)
 
-            btn.tag = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-            btn.tag:SetPoint("TOPLEFT", btn.fontString, "BOTTOMLEFT", 0, -2)
+                    btn.removeBtn = CreateFrame("Button", nil, btn, "UIPanelButtonTemplate")
+                    btn.removeBtn:SetWidth(60); btn.removeBtn:SetHeight(18)
+                    btn.removeBtn:SetPoint("TOPRIGHT", btn, "TOPRIGHT", -5, -29)
+                    btn.removeBtn:SetText("Remove")
 
-            -- Type + group/ungrouped priority text
-            local baseLabel, baseColor
-            if data.type == "Ability" then
-                baseLabel = "Ability"
-                baseColor = "|cff4da6ff"
-            elseif data.type == "Buff" then
-                baseLabel = "Buff"
-                baseColor = "|cff22ff22"
-            elseif data.type == "Debuff" then
-                baseLabel = "Debuff"
-                baseColor = "|cffff4d4d"
-            elseif data.type == "Item" then
-                baseLabel = "Item"
-                baseColor = "|cffffffff"
-            elseif data.type == "Bar" then
-                baseLabel = "Bar"
-                baseColor = "|cffff8000"
-            else
-                baseLabel = tostring(data.type or "")
-                baseColor = "|cffffffff"
-            end
+                    btn.editBtn = CreateFrame("Button", nil, btn, "UIPanelButtonTemplate")
+                    btn.editBtn:SetWidth(50); btn.editBtn:SetHeight(18)
+                    btn.editBtn:SetPoint("RIGHT", btn.removeBtn, "LEFT", -5, 0)
+                    btn.editBtn:SetText("Edit")
 
-            local suffix = ""
-            if DA_IsGrouped(data) then
-                -- Grouped: "Group 2 - Prio X" (with optional " - Group Leader")
-                local gName  = data.group or ""
-                local gIndex = DA_ParseGroupIndex(gName)
-                local groupDesc
-                if gIndex ~= 9999 then
-                    groupDesc = "Group " .. tostring(gIndex)
+                    btn.downBtn = CreateFrame("Button", nil, btn)
+                    btn.downBtn:SetWidth(18); btn.downBtn:SetHeight(18)
+                    btn.downBtn:SetNormalTexture("Interface\\MainMenuBar\\UI-MainMenu-ScrollUpButton-Up")
+                    btn.downBtn:SetPushedTexture("Interface\\MainMenuBar\\UI-MainMenu-ScrollUpButton-Down")
+                    btn.downBtn:SetPoint("RIGHT", btn.editBtn, "LEFT", -5, 0)
+
+                    btn.upBtn = CreateFrame("Button", nil, btn)
+                    btn.upBtn:SetWidth(18); btn.upBtn:SetHeight(18)
+                    btn.upBtn:SetNormalTexture("Interface\\MainMenuBar\\UI-MainMenu-ScrollDownButton-Up")
+                    btn.upBtn:SetPushedTexture("Interface\\MainMenuBar\\UI-MainMenu-ScrollDownButton-Down")
+                    btn.upBtn:SetPoint("RIGHT", btn.downBtn, "LEFT", -5, 0)
+
+                    btn.sep = btn:CreateTexture(nil, "ARTWORK")
+                    btn.sep:SetHeight(1)
+                    btn.sep:SetPoint("BOTTOMLEFT", btn, "BOTTOMLEFT", 0, -2)
+                    btn.sep:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", 0, -2)
+                    btn.sep:SetTexture(0.9, 0.9, 0.9, 0.12)
+
+                    spellButtons[key] = btn
+                end
+
+                btn._daInList = true
+
+                -- Update row visuals
+                btn.fontString:SetText(display)
+
+                -- Type + group/ungrouped priority text
+                local baseLabel, baseColor
+                if data.type == "Ability" then
+                    baseLabel = "Ability"
+                    baseColor = "|cff4da6ff"
+                elseif data.type == "Buff" then
+                    baseLabel = "Buff"
+                    baseColor = "|cff7dff7d"
+                elseif data.type == "Debuff" then
+                    baseLabel = "Debuff"
+                    baseColor = "|cffff7d7d"
+                elseif data.type == "Item" then
+                    baseLabel = "Item"
+                    baseColor = "|cffffd27d"
+                elseif data.type == "Bar" then
+                    baseLabel = "Bar"
+                    baseColor = "|cffd27dff"
                 else
-                    groupDesc = gName
-                end
-                local prio = entry._prioInGroup or 1
-
-                local leaderSuffix = ""
-                if data.isLeader then
-                    leaderSuffix = " - Group Leader"
+                    baseLabel = tostring(data.type or "Unknown")
+                    baseColor = "|cffcccccc"
                 end
 
-                suffix = string.format(" (%s - Prio %d%s)", tostring(groupDesc or "Group"), prio, leaderSuffix)
-            else
-                -- Category/ungrouped bucket: show index/total within that bucket
-                local bucketName  = entry._bucketName or "Ungrouped"
-                local x = entry._bucketIndex or 1
-                local y = entry._bucketTotal or 1
-                local bucketLabel = string.upper(bucketName)
-                suffix = string.format(" (%s - Order# %d/%d)", bucketLabel, x, y)
-            end
-
-            local typeText = baseColor .. baseLabel .. "|r|cffaaaaaa" .. suffix .. "|r"
-            btn.tag:SetText(typeText)
-
-	btn.removeBtn = CreateFrame("Button", nil, btn, "UIPanelButtonTemplate")
-            btn.removeBtn:SetWidth(60); btn.removeBtn:SetHeight(18)
-            btn.removeBtn:SetPoint("TOPRIGHT", btn, "TOPRIGHT", -5, -29)
-            btn.removeBtn:SetText("Remove")
-            btn.removeBtn:SetScript("OnClick", function()
-                -- detect if this was the last icon using them.
-                local groupName    = data and data.group
-                local categoryName = data and data.category
-
-                -- Remove from DoiteAuras DB
-                DoiteAurasDB.spells[key] = nil
-
-                -- Also drop any legacy DoiteDB entry so evaluation stops touching this key
-                if DoiteDB and DoiteDB.icons then
-                    DoiteDB.icons[key] = nil
+                local suffix = ""
+                if DA_IsGrouped(data) then
+                    local groupDesc = data.group
+                    local prio = entry._prioInGroup or 1
+                    local leaderSuffix = ""
+                    if data.isLeader then
+                        leaderSuffix = " - Group Leader"
+                    end
+                    suffix = string.format(" (%s - Prio %d%s)", tostring(groupDesc or "Group"), prio, leaderSuffix)
+                else
+                    local bucketName  = entry._bucketName or "Ungrouped"
+                    local x = entry._bucketIndex or 1
+                    local y = entry._bucketTotal or 1
+                    local bucketLabel = string.upper(bucketName)
+                    suffix = string.format(" (%s - Order# %d/%d)", bucketLabel, x, y)
                 end
 
-                -- Clear cached texture for this entry's display name (if any)
-                local displayName = data and (data.displayName or data.name)
-                if displayName and DoiteAurasDB and DoiteAurasDB.cache then
-                    DoiteAurasDB.cache[displayName] = nil
-                end
+                local typeText = baseColor .. baseLabel .. "|r|cffaaaaaa" .. suffix .. "|r"
+                btn.tag:SetText(typeText)
 
-                -- Hard-destroy the icon frame so no lingering "?" can remain
-                local gname = "DoiteIcon_" .. key
-                local f = _G[gname]
-                if f then
-                    f:Hide()
-                    f:SetParent(nil)
-                    _G[gname] = nil
-                end
-                icons[key] = nil
+                -- Scripts are re-bound each refresh (keeps exact existing logic with current locals)
 
-                -- Hide the list row
-                if spellButtons[key] and spellButtons[key].Hide then
-                    spellButtons[key]:Hide()
-                end
+                btn.removeBtn:SetScript("OnClick", function()
+                    -- detect if this was the last icon using them.
+                    local groupName    = data and data.group
+                    local categoryName = data and data.category
 
-                if DA_CleanupEmptyGroupAndCategory then
-                    DA_CleanupEmptyGroupAndCategory(groupName, categoryName)
-                end
+                    -- Remove from DoiteAuras DB
+                    DoiteAurasDB.spells[key] = nil
 
-                RebuildOrder()
-                RefreshList()
-                RefreshIcons()
-                if DoiteConditions_RequestEvaluate then
-                    DoiteConditions_RequestEvaluate()
-                end
-            end)
-
-            -- Edit
-            btn.editBtn = CreateFrame("Button", nil, btn, "UIPanelButtonTemplate")
-            btn.editBtn:SetWidth(50); btn.editBtn:SetHeight(18)
-            btn.editBtn:SetPoint("RIGHT", btn.removeBtn, "LEFT", -5, 0)
-            btn.editBtn:SetText("Edit")
-            btn.editBtn:SetScript("OnClick", function()
-                local baseName = data.displayName or data.name or display
-
-                currentType = data.type or "Ability"
-                if abilityCB then abilityCB:SetChecked(currentType == "Ability") end
-                if buffCB    then buffCB:SetChecked(currentType == "Buff")    end
-                if debuffCB  then debuffCB:SetChecked(currentType == "Debuff") end
-                if itemsCB   then itemsCB:SetChecked(currentType == "Item")   end
-                if barsCB    then barsCB:SetChecked(currentType == "Bar")     end
-
-                if currentType == "Item" then
-                    DA_UpdateTypeUI()
-                    if itemDropDown then
-                        UIDropDownMenu_SetText(baseName, itemDropDown)
+                    -- Also drop any legacy DoiteDB entry so evaluation stops touching this key
+                    if DoiteDB and DoiteDB.icons and DoiteDB.icons[key] then
+                        DoiteDB.icons[key] = nil
                     end
 
-                elseif currentType == "Bar" then
-                    DA_UpdateTypeUI()
-                    if barDropDown then
-                        UIDropDownMenu_SetText(baseName, barDropDown)
+                    -- Remove cached row frame reference so add/remove cycles don't grow without bound
+                    if spellButtons and spellButtons[key] then
+                        spellButtons[key]:Hide()
+                        spellButtons[key] = nil
                     end
 
-                elseif currentType == "Ability" then
-                    -- Switch to ability dropdown and select this spell if possible
-                    DA_UpdateTypeUI()
-                    if DA_RebuildAbilityDropDown then
-                        DA_RebuildAbilityDropDown()
-                    end
-                    if abilityDropDown then
-                        UIDropDownMenu_SetText(baseName, abilityDropDown)
-                    end
-
-                else
-                    -- Buff / Debuff: keep using manual text input
-                    DA_UpdateTypeUI()
-                    input:SetText(baseName)
-                end
-
-                -- open conditions editor for this entry (pass the composite key)
-                if DoiteConditions_Show then
-                    DoiteConditions_Show(key)
-                else
-                    DEFAULT_CHAT_FRAME:AddMessage("|cffff0000DoiteAuras:|r DoiteConditions not loaded.")
-                end
-            end)
-
-            -- Move buttons (group-aware)
-            btn.downBtn = CreateFrame("Button", nil, btn)
-            btn.downBtn:SetWidth(18); btn.downBtn:SetHeight(18)
-            btn.downBtn:SetNormalTexture("Interface\\MainMenuBar\\UI-MainMenu-ScrollUpButton-Up")
-            btn.downBtn:SetPushedTexture("Interface\\MainMenuBar\\UI-MainMenu-ScrollUpButton-Down")
-            btn.downBtn:SetPoint("RIGHT", btn.editBtn, "LEFT", -5, 0)
-            btn.downBtn:SetScript("OnClick", function()
-                local isGrouped = DA_IsGrouped(data)
-                local moved = false
-
-                if isGrouped then
-                    -- move "up" inside the group (towards first member)
-                    moved = DA_MoveOrderWithinGroup(key, "up")
-                else
-                    -- ungrouped: move only within its category / Ungrouped bucket
-                    moved = DA_MoveOrderWithinCategoryOrUngrouped(key, "up")
-                end
-
-                if moved then
+                    -- Rebuild ordering + UI
                     RebuildOrder()
                     RefreshList()
                     RefreshIcons()
+
                     if DoiteConditions_RequestEvaluate then
                         DoiteConditions_RequestEvaluate()
                     end
-                end
-            end)
+                end)
 
-            btn.upBtn = CreateFrame("Button", nil, btn)
-            btn.upBtn:SetWidth(18); btn.upBtn:SetHeight(18)
-            btn.upBtn:SetNormalTexture("Interface\\MainMenuBar\\UI-MainMenu-ScrollDownButton-Up")
-            btn.upBtn:SetPushedTexture("Interface\\MainMenuBar\\UI-MainMenu-ScrollDownButton-Down")
-            btn.upBtn:SetPoint("RIGHT", btn.downBtn, "LEFT", -5, 0)
-            btn.upBtn:SetScript("OnClick", function()
-                local isGrouped = DA_IsGrouped(data)
-                local moved = false
+                btn.editBtn:SetScript("OnClick", function()
+                    local baseName = data.displayName or data.name or display
 
-                if isGrouped then
-                    -- move "down" inside the group (towards last member)
-                    moved = DA_MoveOrderWithinGroup(key, "down")
-                else
-                    -- ungrouped: move only within its category / Ungrouped bucket
-                    moved = DA_MoveOrderWithinCategoryOrUngrouped(key, "down")
-                end
+                    currentType = data.type or "Ability"
+                    if abilityCB then abilityCB:SetChecked(currentType == "Ability") end
+                    if buffCB    then buffCB:SetChecked(currentType == "Buff")    end
+                    if debuffCB  then debuffCB:SetChecked(currentType == "Debuff") end
+                    if itemsCB   then itemsCB:SetChecked(currentType == "Item")   end
+                    if barsCB    then barsCB:SetChecked(currentType == "Bar")     end
 
-                if moved then
-                    RebuildOrder()
-                    RefreshList()
-                    RefreshIcons()
-                    if DoiteConditions_RequestEvaluate then
-                        DoiteConditions_RequestEvaluate()
+                    if currentType == "Item" then
+                        DA_UpdateTypeUI()
+                        if itemDropDown then
+                            UIDropDownMenu_SetText(baseName, itemDropDown)
+                        end
+
+                    elseif currentType == "Bar" then
+                        DA_UpdateTypeUI()
+                        if barDropDown then
+                            UIDropDownMenu_SetText(baseName, barDropDown)
+                        end
+
+                    else
+                        DA_UpdateTypeUI()
+                        if spellDropDown then
+                            UIDropDownMenu_SetText(baseName, spellDropDown)
+                        end
                     end
-                end
-            end)
 
-            btn.sep = btn:CreateTexture(nil, "ARTWORK")
-            btn.sep:SetHeight(1)
-            btn.sep:SetPoint("BOTTOMLEFT", btn, "BOTTOMLEFT", 0, -2)
-            btn.sep:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", 0, -2)
-            btn.sep:SetTexture(0.9, 0.9, 0.9, 0.12)
+                    if DoiteConditions_Show then
+                        DoiteConditions_Show(key)
+                    end
+                end)
 
-            btn:SetPoint("TOPLEFT", listContent, "TOPLEFT", 0, yOffset)
-            yOffset = yOffset - 55   -- row height (50) + small gap
+                btn.downBtn:SetScript("OnClick", function()
+                    local isGrouped = DA_IsGrouped(data)
+                    local moved = false
 
-            spellButtons[key] = btn
-            btn:Show()
+                    if isGrouped then
+                        -- move "up" inside the group (towards first member)
+                        moved = DA_MoveOrderWithinGroup(key, "up")
+                    else
+                        -- ungrouped: move only within its category / Ungrouped bucket
+                        moved = DA_MoveOrderWithinCategoryOrUngrouped(key, "up")
+                    end
+
+                    if moved then
+                        RebuildOrder()
+                        RefreshList()
+                        RefreshIcons()
+                        if DoiteConditions_RequestEvaluate then
+                            DoiteConditions_RequestEvaluate()
+                        end
+                    end
+                end)
+
+                btn.upBtn:SetScript("OnClick", function()
+                    local isGrouped = DA_IsGrouped(data)
+                    local moved = false
+
+                    if isGrouped then
+                        moved = DA_MoveOrderWithinGroup(key, "down")
+                    else
+                        moved = DA_MoveOrderWithinCategoryOrUngrouped(key, "down")
+                    end
+
+                    if moved then
+                        RebuildOrder()
+                        RefreshList()
+                        RefreshIcons()
+                        if DoiteConditions_RequestEvaluate then
+                            DoiteConditions_RequestEvaluate()
+                        end
+                    end
+                end)
+
+                -- Position row (ClearAllPoints is important when reusing frames)
+                btn:ClearAllPoints()
+                btn:SetPoint("TOPLEFT", listContent, "TOPLEFT", 0, yOffset)
+                yOffset = yOffset - 55
+                btn:Show()
+            end
+        end
+    end
+
+    -- Hide any row frames that weren't used this refresh (covers removed keys)
+    for _, v in pairs(spellButtons) do
+        if v and (v._daInList ~= true) then
+            if v.Hide then v:Hide() end
         end
     end
 

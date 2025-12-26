@@ -388,8 +388,17 @@ local function InitGroupDropdown(dd, data)
                 UIDropDownMenu_SetText(picked, dd)
                 CloseDropDownMenus()
                 UpdateCondFrameForKey(currentKey)
+
+                -- Queue the normal batched refresh/evaluate
                 SafeRefresh()
 				SafeEvaluate()
+
+                -- if /da is open, force an immediate list refresh so the icon visibly moves to the selected group right away (no reopen needed).
+                if DoiteAurasFrame and DoiteAurasFrame.IsShown and DoiteAurasFrame:IsShown() then
+                    if DoiteAuras_RefreshList then
+                        pcall(DoiteAuras_RefreshList)
+                    end
+                end
             end
 
             if data and ((not data.group and choice == "No") or (data.group == choice)) then
