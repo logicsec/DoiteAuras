@@ -1,8 +1,8 @@
 # DoiteAuras
 Looking for WeakAuras in Vanilla WoW? DoiteAuras is a lightweight, condition-based tracker for **abilities**, **buffs**, **debuffs**, **items** and **bars** in 1.12.
 
-## OBS BETA TESTING. IF YOU ENCOUNTER ANY BUGS LET ME KNOW.
-_Yes, I know about the Paladin tracking of time: judgement of wisdom/light and i know how to fix, just risky_
+## OBS: OPEN BETA TESTING - IF YOU ENCOUNTER ANY BUGS, LET ME KNOW.
+_Yes, I know about the Paladin tracking of time remaining: judgement of wisdom/light is not working due to there is no event for it, and I know how to fix it, just annoying._
 
 > [!IMPORTANT]
 >
@@ -32,10 +32,10 @@ _Timestamps are available in the description._
 - `/da` or `/doite` or `/doiteauras`
 
 ## Shared exported builds
-- Warrior: [**LINK**](https://pastebin.com/kh9b4Vex)
-- Druid: [all forms]: [**LINK**](https://pastebin.com/uJtpumYd)
-- Kara40 Boss Debuffs: [**LINK**](https://pastebin.com/mf7KVYTX)
-- Melee consumes: [**LINK**](https://pastebin.com/kknCLm6A)
+- Warrior: [**LINK**](https://pastecode.io/s/9npu3jvg)
+- Druid: [all forms]: [**LINK**](https://pastecode.io/s/fd99yvzi)
+- Kara40 Boss Debuffs: [**LINK**](https://pastecode.io/s/473z2tgz)
+- Melee consumes: [**LINK**](https://pastecode.io/s/qxdv08qp)
 
 _To import - copy the text, press the import button inside DoiteAuras in-game and paste._
 
