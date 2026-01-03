@@ -86,7 +86,7 @@ local function UpdateDebuffs()
   DoitePlayerAuras.activeDebuffs = {}
 
   for i = 1, 16 do
-    local _, stacks, spellId = UnitDebuff("player", i)
+    local _, stacks, _, spellId = UnitDebuff("player", i)
     if spellId then
       DoitePlayerAuras.debuffs[i].spellId = spellId
       DoitePlayerAuras.debuffs[i].stacks = stacks
