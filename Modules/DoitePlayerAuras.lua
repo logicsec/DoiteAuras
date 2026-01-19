@@ -4,6 +4,9 @@
 -- Please respect license note: Ask permission
 -- WoW 1.12 | Lua 5.0
 ---------------------------------------------------------------
+local MAX_BUFF_SLOTS = 32
+local MAX_DEBUFF_SLOTS = 16
+
 local DoitePlayerAuras = {
   buffs = {}, -- slot -> { spellId, stacks }
   debuffs = {}, -- slot -> { spellId, stacks }
@@ -15,9 +18,6 @@ local DoitePlayerAuras = {
   activeBuffs = {}, -- spell name -> slot
   activeDebuffs = {}, -- spell name -> slot
 
-  numBuffs = 0,
-  numDebuffs = 0,
-  numCappedBuffs = 0,
   cappedBuffsExpirationTime = {}, -- spell name -> expiration time
   cappedBuffsStacks = {}, -- spell name -> stacks
 
@@ -25,16 +25,17 @@ local DoitePlayerAuras = {
 
   playerGuid = "",
 
+  buffCapEventsEnabled = false,
   debugBuffCap = false -- set to true to disable regular events and force buff cap events for testing
 }
 -- initialize all buff/debuff indexes
-for i = 1, 32 do
+for i = 1, MAX_BUFF_SLOTS do
   table.insert(DoitePlayerAuras.buffs, {
     spellId = nil,
     stacks = nil
   })
 end
-for i = 1, 16 do
+for i = 1, MAX_DEBUFF_SLOTS do
   table.insert(DoitePlayerAuras.debuffs, {
     spellId = nil,
     stacks = nil
@@ -71,10 +72,6 @@ end
 local function RemoveCappedBuff(spellName)
   -- set expiration to 0
   DoitePlayerAuras.cappedBuffsExpirationTime[spellName] = 0
-  -- decrement buff count if it was active (stacks were > 0)
-  if DoitePlayerAuras.cappedBuffsStacks[spellName] and DoitePlayerAuras.cappedBuffsStacks[spellName] > 0 then
-    DoitePlayerAuras.numCappedBuffs = math.max(0, DoitePlayerAuras.numCappedBuffs - 1)
-  end
   -- wipe stacks
   DoitePlayerAuras.cappedBuffsStacks[spellName] = 0
 end
@@ -83,19 +80,16 @@ local function UpdateBuffs()
   -- clear active buffs
   DoitePlayerAuras.activeBuffs = {}
 
-  DoitePlayerAuras.numBuffs = 0
-
   -- update existing buffs/debuffs
-  for i = 1, 32 do
+  for i = 1, MAX_BUFF_SLOTS do
     local _, stacks, spellId = UnitBuff("player", i)
     if spellId then
       DoitePlayerAuras.buffs[i].spellId = spellId
       DoitePlayerAuras.buffs[i].stacks = stacks
       MarkActive(spellId, DoitePlayerAuras.activeBuffs, i)
-      DoitePlayerAuras.numBuffs = DoitePlayerAuras.numBuffs + 1
     else
       -- once we hit nil, all remaining will be nil, so clear them and break
-      for j = i, 32 do
+      for j = i, MAX_BUFF_SLOTS do
         DoitePlayerAuras.buffs[j].spellId = nil
         DoitePlayerAuras.buffs[j].stacks = nil
       end
@@ -108,18 +102,15 @@ local function UpdateDebuffs()
   -- clear active debuffs
   DoitePlayerAuras.activeDebuffs = {}
 
-  DoitePlayerAuras.numDebuffs = 0
-
-  for i = 1, 16 do
+  for i = 1, MAX_DEBUFF_SLOTS do
     local _, stacks, _, spellId = UnitDebuff("player", i)
     if spellId then
       DoitePlayerAuras.debuffs[i].spellId = spellId
       DoitePlayerAuras.debuffs[i].stacks = stacks
       MarkActive(spellId, DoitePlayerAuras.activeDebuffs, i)
-      DoitePlayerAuras.numDebuffs = DoitePlayerAuras.numBuffs + 1
     else
       -- once we hit nil, all remaining will be nil, so clear them and break
-      for j = i, 16 do
+      for j = i, MAX_DEBUFF_SLOTS do
         DoitePlayerAuras.debuffs[j].spellId = nil
         DoitePlayerAuras.debuffs[j].stacks = nil
       end
@@ -180,7 +171,7 @@ function DoitePlayerAuras.GetBuffStacks(spellName)
   end
 
   -- fallback: search through buffs for matching spell ID
-  for i = 1, 32 do
+  for i = 1, MAX_BUFF_SLOTS do
     if not DoitePlayerAuras.buffs[i].spellId then
       break
     end
@@ -211,7 +202,7 @@ function DoitePlayerAuras.GetDebuffStacks(spellName)
   end
 
   -- fallback: search through debuffs for matching spell ID
-  for i = 1, 16 do
+  for i = 1, MAX_DEBUFF_SLOTS do
     if not DoitePlayerAuras.debuffs[i].spellId then
       break
     end
@@ -285,7 +276,7 @@ PlayerEnteringWorldFrame:SetScript("OnEvent", function()
   DoitePlayerAuras.playerGuid = guid or ""
 
   -- if already buff capped enable extra events
-  if DoitePlayerAuras.buffs[32].spellId or DoitePlayerAuras.debugBuffCap then
+  if DoitePlayerAuras.buffs[MAX_BUFF_SLOTS].spellId or DoitePlayerAuras.debugBuffCap then
     DoitePlayerAuras.RegisterBuffCapEvents()
   end
 end)
@@ -300,8 +291,7 @@ BuffAddedFrame:SetScript("OnEvent", function()
   DoitePlayerAuras.buffs[unitSlot].spellId = spellId
   DoitePlayerAuras.buffs[unitSlot].stacks = stacks
   MarkActive(spellId, DoitePlayerAuras.activeBuffs, unitSlot)
-  DoitePlayerAuras.numBuffs = math.min(32, DoitePlayerAuras.numBuffs + 1)
-  if DoitePlayerAuras.numBuffs == 32 then
+  if unitSlot == MAX_BUFF_SLOTS then
     -- just hit buff cap, enable AURA_CAST event
     DoitePlayerAuras.RegisterBuffCapEvents()
   end
@@ -317,7 +307,12 @@ BuffRemovedFrame:SetScript("OnEvent", function()
   -- probably could just shift down buffs a slot but not sure what happens when 2 get removed at the exact same time
   UpdateBuffs()
   MarkInactive(spellId, DoitePlayerAuras.activeBuffs)
-  DoitePlayerAuras.numBuffs = math.max(0, DoitePlayerAuras.numBuffs - 1)
+
+  -- check if unit buff slot 32 is open
+  if not DoitePlayerAuras.buffs[MAX_BUFF_SLOTS].spellId then
+    -- no longer buff capped, disable AURA_CAST event
+    DoitePlayerAuras.UnregisterBuffCapEvents()
+  end
 end)
 
 -- Frame for DEBUFF_ADDED_SELF event
@@ -330,7 +325,6 @@ DebuffAddedFrame:SetScript("OnEvent", function()
   DoitePlayerAuras.debuffs[unitSlot].spellId = spellId
   DoitePlayerAuras.debuffs[unitSlot].stacks = stacks
   MarkActive(spellId, DoitePlayerAuras.activeDebuffs, unitSlot)
-  DoitePlayerAuras.numDebuffs = math.min(DoitePlayerAuras.numDebuffs + 1, 16)
 end)
 
 -- Frame for DEBUFF_REMOVED_SELF event
@@ -343,7 +337,6 @@ DebuffRemovedFrame:SetScript("OnEvent", function()
   -- probably could just shift down buffs a slot but not sure what happens when 2 get removed at the exact same time
   UpdateDebuffs()
   MarkInactive(spellId, DoitePlayerAuras.activeDebuffs)
-  DoitePlayerAuras.numDebuffs = math.max(0, DoitePlayerAuras.numDebuffs - 1)
 end)
 
 -- Frame for AURA_CAST_ON_SELF event (dynamically registered during buff cap)
@@ -388,11 +381,6 @@ AuraCastFrame:SetScript("OnEvent", function()
     local currentStacks = DoitePlayerAuras.cappedBuffsStacks[spellName] or 0
     local maxStacks = DoitePlayerAuras.spellNameToMaxStacks[spellName] or 1
 
-    -- if going from 0 to non-zero stacks, increment capped buff count
-    if currentStacks == 0 then
-      DoitePlayerAuras.numCappedBuffs = DoitePlayerAuras.numCappedBuffs + 1
-    end
-
     DoitePlayerAuras.cappedBuffsStacks[spellName] = math.min(currentStacks + 1, maxStacks)
   end
 end)
@@ -431,6 +419,10 @@ UnitCastEventFrame:SetScript("OnEvent", function()
 end)
 
 function DoitePlayerAuras.RegisterBuffCapEvents()
+  if DoitePlayerAuras.buffCapEventsEnabled then
+    return
+  end
+  DoitePlayerAuras.buffCapEventsEnabled = true
   AuraCastFrame:RegisterEvent("AURA_CAST_ON_SELF")
   UnitCastEventFrame:RegisterEvent("UNIT_CASTEVENT")
 end
@@ -438,6 +430,10 @@ end
 -- Currently unused as it is hard to know when we can safely unregister these events
 -- shouldn't be an issue if left registered even after someone drops below buff cap
 function DoitePlayerAuras.UnregisterBuffCapEvents()
+  if not DoitePlayerAuras.buffCapEventsEnabled then
+    return
+  end
+  DoitePlayerAuras.buffCapEventsEnabled = false
   AuraCastFrame:UnregisterEvent("AURA_CAST_ON_SELF")
   UnitCastEventFrame:UnregisterEvent("UNIT_CASTEVENT")
 end
