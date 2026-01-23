@@ -1246,10 +1246,10 @@ local function CreateConditionsUI()
   end
 
   -- === Separator Y positions ===
-  local srow1_y, srow2_y, srow3_y, srow4_y, srow5_y = -5, -45, -85, -125, -165
-  local srow6_y, srow7_y, srow8_y, srow9_y, srow10_y = -205, -245, -285, -325, -365
-  local srow11_y, srow12_y, srow13_y, srow14_y, srow15_y = -405, -445, -485, -525, -565
-  local srow16_y, srow17_y, srow18_y, srow19_y, srow20_y = -605, -645, -685, -725, -765
+  local srow1_y, srow2_y, srow3_y, srow4_y, srow5_y = -5, -45, -110, -150, -190
+  local srow6_y, srow7_y, srow8_y, srow9_y, srow10_y = -230, -270, -310, -350, -390
+  local srow11_y, srow12_y, srow13_y, srow14_y, srow15_y = -430, -470, -510, -550, -590
+  local srow16_y, srow17_y, srow18_y, srow19_y, srow20_y = -630, -670, -710, -750, -790
 
   srows = {
     srow1_y, srow2_y, srow3_y, srow4_y, srow5_y,
@@ -1348,9 +1348,9 @@ local function CreateConditionsUI()
   end
 
   -- row positions
-  local row1_y, row2_y, row3_y, row4_y, row5_y = -20, -60, -100, -140, -180
-  local row6_y, row7_y, row8_y, row9_y, row10_y = -220, -260, -300, -340, -380
-  local row11_y, row12_y, row13_y, row14_y, row15_y = -420, -460, -500, -540, -580
+  local row1_y, row2_y, row2b_y, row3_y, row4_y, row5_y = -20, -60, -85, -125, -165, -205
+  local row6_y, row7_y, row8_y, row9_y, row10_y = -245, -285, -325, -365, -405
+  local row11_y, row12_y, row13_y, row14_y, row15_y = -445, -485, -525, -565, -605
   local row16_y, row17_y, row18_y, row19_y, row20_y = -620, -660, -700, -740, -780
 
   condFrame._rowY = {
@@ -1370,8 +1370,8 @@ local function CreateConditionsUI()
 
   condFrame.cond_ability_incombat = MakeCheck("DoiteCond_Ability_InCombat", "In combat", 0, row2_y)
   condFrame.cond_ability_outcombat = MakeCheck("DoiteCond_Ability_OutCombat", "Out of combat", 80, row2_y)
-  condFrame.cond_ability_inparty = MakeCheck("DoiteCond_Ability_InParty", "In party", 190, row2_y)
-  condFrame.cond_ability_inraid = MakeCheck("DoiteCond_Ability_InRaid", "In raid", 260, row2_y)
+  condFrame.cond_ability_inparty = MakeCheck("DoiteCond_Ability_InParty", "In party", 0, row2b_y)
+  condFrame.cond_ability_inraid = MakeCheck("DoiteCond_Ability_InRaid", "In raid", 70, row2b_y)
   SetSeparator("ability", 2, "COMBAT & GROUP STATE", true, true)
 
   condFrame.cond_ability_target_help = MakeCheck("DoiteCond_Ability_TargetHelp", "Target (help)", 0, row3_y)
@@ -1492,8 +1492,8 @@ local function CreateConditionsUI()
 
   condFrame.cond_aura_incombat = MakeCheck("DoiteCond_Aura_InCombat", "In combat", 0, row2_y)
   condFrame.cond_aura_outcombat = MakeCheck("DoiteCond_Aura_OutCombat", "Out of combat", 80, row2_y)
-  condFrame.cond_aura_inparty = MakeCheck("DoiteCond_Aura_InParty", "In party", 190, row2_y)
-  condFrame.cond_aura_inraid = MakeCheck("DoiteCond_Aura_InRaid", "In raid", 260, row2_y)
+  condFrame.cond_aura_inparty = MakeCheck("DoiteCond_Aura_InParty", "In party", 0, row2b_y)
+  condFrame.cond_aura_inraid = MakeCheck("DoiteCond_Aura_InRaid", "In raid", 70, row2b_y)
   SetSeparator("aura", 2, "COMBAT & GROUP STATE", true, true)
 
   condFrame.cond_aura_target_help = MakeCheck("DoiteCond_Aura_TargetHelp", "Target (help)", 0, row3_y)
@@ -1666,8 +1666,8 @@ local function CreateConditionsUI()
   -- COMBAT STATE
   condFrame.cond_item_incombat = MakeCheck("DoiteCond_Item_InCombat", "In combat", 0, row3_y)
   condFrame.cond_item_outcombat = MakeCheck("DoiteCond_Item_OutCombat", "Out of combat", 80, row3_y)
-  condFrame.cond_item_inparty = MakeCheck("DoiteCond_Item_InParty", "In party", 190, row3_y)
-  condFrame.cond_item_inraid = MakeCheck("DoiteCond_Item_InRaid", "In raid", 260, row3_y)
+  condFrame.cond_item_inparty = MakeCheck("DoiteCond_Item_InParty", "In party", 0, row3_y + 25)
+  condFrame.cond_item_inraid = MakeCheck("DoiteCond_Item_InRaid", "In raid", 70, row3_y + 25)
   SetSeparator("item", 3, "COMBAT & GROUP STATE", true, true)
 
   -- TARGET CONDITIONS
