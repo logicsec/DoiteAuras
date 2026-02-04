@@ -80,6 +80,12 @@ local function _GetIconFrame(k)
   return f
 end
 
+local function _ForgetIconFrame(k)
+  if DoiteConditions and DoiteConditions._iconFrameByKey then
+    DoiteConditions._iconFrameByKey[k] = nil
+  end
+end
+
 local function _Now()
 
   return (_GetTime and _GetTime()) or 0
@@ -6353,27 +6359,30 @@ function DoiteConditions:ApplyVisuals(key, show, glow, grey)
 
     -- Apply position and alpha (no stutter:set exact coordinates each paint)
     do
-      -- When sliding: apply transient movement to everyone (leaders + followers)
-      if slideActive then
-        frame:ClearAllPoints()
-        frame:SetPoint("CENTER", UIParent, "CENTER", baseX + dx, baseY + dy)
-        frame:SetAlpha(slideAlpha)
-      else
-        -- When not sliding: do NOT force followers' points here.
-        if not (isGrouped and not isLeader) then
-          frame:ClearAllPoints()
-          frame:SetPoint("CENTER", UIParent, "CENTER", baseX, baseY)
-          frame:SetAlpha((dataTbl and dataTbl.alpha) or 1)
-        else
-          -- Followers:
-          -- Only re-anchor having a computed group position for this key.
-          if hasGroupPos then
+      -- Do not force position if user is dragging this frame
+      if not frame._daDragging then
+          -- When sliding: apply transient movement to everyone (leaders + followers)
+          if slideActive then
             frame:ClearAllPoints()
-            frame:SetPoint("CENTER", UIParent, "CENTER", baseX, baseY)
+            frame:SetPoint("CENTER", UIParent, "CENTER", baseX + dx, baseY + dy)
+            frame:SetAlpha(slideAlpha)
+          else
+            -- When not sliding: do NOT force followers' points here.
+            if not (isGrouped and not isLeader) then
+              frame:ClearAllPoints()
+              frame:SetPoint("CENTER", UIParent, "CENTER", baseX, baseY)
+              frame:SetAlpha((dataTbl and dataTbl.alpha) or 1)
+            else
+              -- Followers:
+              -- Only re-anchor having a computed group position for this key.
+              if hasGroupPos then
+                frame:ClearAllPoints()
+                frame:SetPoint("CENTER", UIParent, "CENTER", baseX, baseY)
+              end
+              -- If !hasGroupPos: do not touch points this tick; avoid snapping back to original x/y.
+              frame:SetAlpha((dataTbl and dataTbl.alpha) or 1)
+            end
           end
-          -- If !hasGroupPos: do not touch points this tick; avoid snapping back to original x/y.
-          frame:SetAlpha((dataTbl and dataTbl.alpha) or 1)
-        end
       end
     end
     -- === Overlay Text: cooldown remaining + stacks (forced above glow) ===

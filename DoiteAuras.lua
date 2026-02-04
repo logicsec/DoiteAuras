@@ -1706,60 +1706,70 @@ local function CreateOrUpdateIcon(key, layer)
                 end
             end
 
-            -- Start dragging
+            -- Start dragging (MoveAnything style: plain StartMoving + flag)
             _G["DoiteUI_Dragging"] = true
             this:StartMoving()
+            this._daDragging = true
         end)
 
         -- Drag stop handler
+        -- Drag stop handler
         f:SetScript("OnDragStop", function()
             this:StopMovingOrSizing()
+            this._daDragging = nil
             _G["DoiteUI_Dragging"] = false
             GameTooltip:Hide()
 
             local frameKey = this._daKey
-            local editKey = _G["DoiteEdit_CurrentKey"]
+            
+            -- Only save if valid key
+            if not frameKey then return end
 
-            -- Only update position if we were editing this icon
-            if not editKey or editKey ~= frameKey then
-                return
-            end
+            -- MoveAnything Coordinate Formula:
+            -- Precise deviation from screen center, normalized to frame scale.
+            
+            -- 1. Screen Center (Reference)
+            local rScale = UIParent:GetEffectiveScale()
+            local rX, rY = UIParent:GetCenter()
+            rX, rY = rX * rScale, rY * rScale
 
-            -- Calculate position relative to screen center
-            local x, y = this:GetCenter()
-            local px, py = UIParent:GetCenter()
-            local scale = this:GetEffectiveScale()
-            local pscale = UIParent:GetEffectiveScale()
+            -- 2. Frame Center (Target)
+            local pScale = this:GetEffectiveScale()
+            local pX, pY = this:GetCenter()
+            pX, pY = pX * pScale, pY * pScale
 
-            local offsetX = (x * scale) / pscale - px
-            local offsetY = (y * scale) / pscale - py
+            -- 3. Offset = (Frame - Screen) / FrameScale
+            local x = (pX - rX) / pScale
+            local y = (pY - rY) / pScale
 
-            -- Apply snap-to-grid if enabled
-            if DoiteAurasDB.settings and DoiteAurasDB.settings.snapToGrid then
-                local grid = DoiteAurasDB.settings.gridSize or 20
-                offsetX = math.floor(offsetX / grid + 0.5) * grid
-                offsetY = math.floor(offsetY / grid + 0.5) * grid
-            end
-
-            -- Round to integers
-            offsetX = math.floor(offsetX + 0.5)
-            offsetY = math.floor(offsetY + 0.5)
+            -- Round for cleaner DB
+            x = math.floor(x * 10 + 0.5) / 10
+            y = math.floor(y * 10 + 0.5) / 10
 
             -- Update DB
             local data = DoiteAurasDB and DoiteAurasDB.spells and DoiteAurasDB.spells[frameKey]
             if data then
-                data.offsetX = offsetX
-                data.offsetY = offsetY
+                data.point = "CENTER"
+                data.relativePoint = "CENTER"
+                data.x = x
+                data.y = y
+                -- Legacy fields sync
+                data.offsetX = x
+                data.offsetY = y
             end
 
-            -- Sync sliders in edit panel
+            -- Sync sliders
             if DoiteEdit_SyncSlidersToPosition then
-                DoiteEdit_SyncSlidersToPosition(frameKey, offsetX, offsetY)
+                DoiteEdit_SyncSlidersToPosition(frameKey, x, y)
             end
 
-            -- Flush any pending heavy work
             if DoiteEdit_FlushHeavy then
                 DoiteEdit_FlushHeavy()
+            end
+            
+            -- Force group layout re-calc so followers snap to new leader pos immediately
+            if DoiteGroup and DoiteGroup.RequestReflow then
+                DoiteGroup.RequestReflow()
             end
         end)
     end
@@ -2124,24 +2134,35 @@ local function RefreshIcons()
                 size = size or currentSize
                 -- DO NOT SetPoint here for follower without computed pos (avoid snap-back)
             else
-                -- ungrouped or leader: use saved offsets
-                posX = (data and (data.offsetX or data.x)) or 0
-                posY = (data and (data.offsetY or data.y)) or 0
                 size = size or (data and (data.iconSize or data.size)) or 36
             end
         end
+
+        local savedPoint = (data and data.point) or "CENTER"
+        local savedRelPoint = (data and data.relativePoint) or "CENTER"
+        local savedX = (data and (data.x or data.offsetX)) or 0
+        local savedY = (data and (data.y or data.offsetY)) or 0
+
 
         f:SetScale((data and data.scale) or 1)
         f:SetAlpha((data and data.alpha) or 1)
         f:SetWidth(size); f:SetHeight(size)
 
         -- Do not re-anchor while a slide preview owns the frame for this tick
-        if not f._daSliding then
-            if posX ~= nil and posY ~= nil then
-                f:ClearAllPoints()
-                f:SetPoint("CENTER", UIParent, "CENTER", posX, posY)
+        -- AND do not re-anchor if this frame is currently being dragged (prevents snapping back)
+        local isDraggingThis = (f._daDragging == true)
+        if not f._daSliding and not isDraggingThis then
+            f:ClearAllPoints()
+            -- logicsec: Use saved Center-Relative points
+            if posX and posY then
+                 -- Computed position (grouped) OR Saved Position
+                 f:SetPoint("CENTER", UIParent, "CENTER", posX, posY)
+            else
+                 -- Fallback (should have been covered by posX/posY logic above)
+                 f:SetPoint("CENTER", UIParent, "CENTER", savedX, savedY)
             end
         end
+
 
         -- Texture handling (with saved iconTexture fallback; no extra game queries here)
         local displayName = (data and (data.displayName or data.name)) or key
