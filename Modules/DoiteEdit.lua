@@ -213,9 +213,46 @@ local function _CreateGridFrame()
     -- Add grid size label at center
     if not grid.label then
       grid.label = grid:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-      grid.label:SetPoint("TOP", UIParent, "CENTER", 0, -10)
+      grid.label:SetPoint("TOP", UIParent, "CENTER", 0, -20)
     end
     grid.label:SetText("Grid: " .. gridSize .. "px | Drag icons to reposition")
+
+    -- Center crosshair indicator (more prominent)
+    if not grid.centerH then
+      grid.centerH = grid:CreateTexture(nil, "ARTWORK")
+      grid.centerH:SetTexture(0, 1, 0)  -- Green horizontal
+      grid.centerH:SetWidth(60)
+      grid.centerH:SetHeight(3)
+      grid.centerH:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+    end
+    grid.centerH:SetAlpha(1)
+
+    if not grid.centerV then
+      grid.centerV = grid:CreateTexture(nil, "ARTWORK")
+      grid.centerV:SetTexture(1, 0, 0)  -- Red vertical
+      grid.centerV:SetWidth(3)
+      grid.centerV:SetHeight(60)
+      grid.centerV:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+    end
+    grid.centerV:SetAlpha(1)
+
+    -- Center point marker
+    if not grid.centerDot then
+      grid.centerDot = grid:CreateTexture(nil, "ARTWORK")
+      grid.centerDot:SetTexture(1, 1, 0)  -- Yellow center dot
+      grid.centerDot:SetWidth(8)
+      grid.centerDot:SetHeight(8)
+      grid.centerDot:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+    end
+    grid.centerDot:SetAlpha(1)
+
+    -- Center label
+    if not grid.centerLabel then
+      grid.centerLabel = grid:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+      grid.centerLabel:SetPoint("TOP", UIParent, "CENTER", 0, -35)
+      grid.centerLabel:SetText("CENTER (0, 0)")
+      grid.centerLabel:SetTextColor(1, 1, 0)
+    end
   end
 
   grid.DrawGrid = DrawGrid
