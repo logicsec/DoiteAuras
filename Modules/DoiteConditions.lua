@@ -1318,7 +1318,7 @@ local function _EvaluateItemCoreState(data, c)
 
         local needTE = false
         if (mode == "notcd"
-              and (c.textTimeRemaining == true or c.remainingEnabled == true or c.enchant == true))
+              and (c.textTimeRemaining == true or c.remainingEnabled == true or c.enchant ~= nil))
             or (c.textStackCounter == true)
             or (c.stacksEnabled == true) then
           needTE = true
@@ -1380,7 +1380,7 @@ local function _EvaluateItemCoreState(data, c)
 
                 local key = tostring(slotC.itemId or 0) .. ":" .. tostring(teId)
 
-                -- If enchant id changes, reset the absolute timer so we don't keep stale timing.
+                -- If enchant id changes, reset the absolute timer - don't keep stale timing.
                 local prevTeId = slotC.tempEnchantId
                 if prevTeId ~= teId then
                   slotC.endTime = nil
@@ -1393,7 +1393,7 @@ local function _EvaluateItemCoreState(data, c)
 
                   -- IMPORTANT:
                   -- Some clients update tempEnchantmentTimeLeftMs in coarse steps (or it can stick).
-                  -- If we overwrite endTime every refresh with (now + msLeft), the countdown freezes.
+                  -- overwrite endTime every refresh with (now + msLeft), the countdown freezes.
                   if (not slotC.endTime) or (not prevMs) then
                     slotC.endTime = now + (msLeft / 1000)
                   else
@@ -1412,7 +1412,7 @@ local function _EvaluateItemCoreState(data, c)
                 else
                   slotC._msLeft = nil
 
-                  -- Only fall back to memory if we don't already have a valid running timer.
+                  -- Only fall back to memory - don't already have a valid running timer.
                   if (not slotC.endTime) or (slotC.endTime <= now) then
                     local endT = memE[key]
                     if endT and endT > now then
@@ -4949,19 +4949,34 @@ local function CheckItemConditions(data)
   end
 
   -- --------------------------------------------------------------------
-  -- Enchant-only visibility for equipped weapon slots ("---EQUIPPED WEAPON SLOTS---")
-  -- If enabled, only show when a temporary enchant is active (time left > 0). Uses state.teRem computed in _EvaluateItemCoreState (seconds; 0 when none/expired).
+  -- Enchant visibility for equipped weapon slots ("---EQUIPPED WEAPON SLOTS---")
+  --  * c.enchant == true  -> show only when a temp enchant is active
+  --  * c.enchant == false -> show only when NO temp enchant is active
+  --  * c.enchant == nil   -> do not gate
+  -- Uses state.teRem computed in _EvaluateItemCoreState (seconds; nil/0 when none/expired).
   -- --------------------------------------------------------------------
-  if c.enchant == true then
+  if c.enchant ~= nil then
     local dn = data.displayName or data.name
     if dn == "---EQUIPPED WEAPON SLOTS---" then
-      if (not state.teRem) or state.teRem <= 0 then
-        local glow = c.glow and true or false
-        local grey = c.greyscale and true or false
-        return false, glow, grey
+      local hasEnchant = (state and state.teRem and state.teRem > 0) and true or false
+
+      if c.enchant == true then
+        if not hasEnchant then
+          local glow = c.glow and true or false
+          local grey = c.greyscale and true or false
+          return false, glow, grey
+        end
+      else
+        -- c.enchant == false => inverse: only show when missing enchant
+        if hasEnchant then
+          local glow = c.glow and true or false
+          local grey = c.greyscale and true or false
+          return false, glow, grey
+        end
       end
     end
   end
+
 
   -- --------------------------------------------------------------------
   -- 2. Combat state
