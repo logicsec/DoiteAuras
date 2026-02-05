@@ -221,7 +221,7 @@ local function ComputeGroupLayout(entries, groupName)
   local limit = num(L.numAuras, 5)
   local fixed = GetGroupFixedMode(groupName, L)
   local settings = (DoiteAurasDB and DoiteAurasDB.settings)
-  local spacing = (settings and settings.spacing) or 8
+  local spacing = num(L.spacing, (settings and settings.spacing) or 8)
   local pad = baseSize + spacing
 
   -- 2) Build pools: known (for fixed slots) and visible-known (for actual placement)

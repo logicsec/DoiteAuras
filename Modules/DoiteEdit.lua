@@ -8687,6 +8687,15 @@ function UpdateCondFrameForKey(key)
       if condFrame.numAurasDD then
         condFrame.numAurasDD:Hide()
       end
+      if condFrame.spacingLabel then
+        condFrame.spacingLabel:Hide()
+      end
+      if condFrame.spacingEdit then
+        condFrame.spacingEdit:Hide()
+      end
+      if condFrame.spacingSlider then
+        condFrame.spacingSlider:Hide()
+      end
     else
       condFrame.leaderCB:Show()
       local leaders = BuildGroupLeaders()
@@ -8708,6 +8717,20 @@ function UpdateCondFrameForKey(key)
           UIDropDownMenu_SetSelectedValue(condFrame.numAurasDD, data.numAuras or 5)
           UIDropDownMenu_SetText(tostring(data.numAuras or 5), condFrame.numAurasDD)
         end
+        if condFrame.spacingLabel and condFrame.spacingEdit then
+          condFrame.spacingLabel:Show()
+          condFrame.spacingEdit:Show()
+          local s = data.spacing
+          if not s then
+            local settings = (DoiteAurasDB and DoiteAurasDB.settings)
+            s = (settings and settings.spacing) or 8
+          end
+          condFrame.spacingEdit:SetText(tostring(s))
+          if condFrame.spacingSlider then
+             condFrame.spacingSlider:Show()
+             condFrame.spacingSlider:SetValue(s)
+          end
+        end
       else
         if leaderKey == key then
           condFrame.leaderCB:SetChecked(true)
@@ -8725,6 +8748,20 @@ function UpdateCondFrameForKey(key)
             UIDropDownMenu_SetSelectedValue(condFrame.numAurasDD, data.numAuras or 5)
             UIDropDownMenu_SetText(tostring(data.numAuras or 5), condFrame.numAurasDD)
           end
+          if condFrame.spacingLabel and condFrame.spacingEdit then
+            condFrame.spacingLabel:Show()
+            condFrame.spacingEdit:Show()
+            local s = data.spacing
+            if not s then
+              local settings = (DoiteAurasDB and DoiteAurasDB.settings)
+              s = (settings and settings.spacing) or 8
+            end
+            condFrame.spacingEdit:SetText(tostring(s))
+            if condFrame.spacingSlider then
+               condFrame.spacingSlider:Show()
+               condFrame.spacingSlider:SetValue(s)
+            end
+          end
         else
           condFrame.leaderCB:SetChecked(false)
           condFrame.leaderCB:Enable()
@@ -8736,6 +8773,15 @@ function UpdateCondFrameForKey(key)
           end
           if condFrame.numAurasDD then
             condFrame.numAurasDD:Hide()
+          end
+          if condFrame.spacingLabel then
+            condFrame.spacingLabel:Hide()
+          end
+          if condFrame.spacingEdit then
+            condFrame.spacingEdit:Hide()
+          end
+          if condFrame.spacingSlider then
+            condFrame.spacingSlider:Hide()
           end
         end
       end
@@ -8942,6 +8988,67 @@ function DoiteConditions_Show(key)
     end
     condFrame.numAurasDD:Hide()
 
+    -- Spacing Label + Slider + EditBox
+    condFrame.spacingLabel = condFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    condFrame.spacingLabel:SetPoint("TOPLEFT", condFrame, "TOPLEFT", 20, -128)
+    condFrame.spacingLabel:SetText("Spacing")
+    condFrame.spacingLabel:Hide()
+
+    condFrame.spacingSlider = CreateFrame("Slider", "DoiteConditions_SpacingSlider", condFrame, "OptionsSliderTemplate")
+    condFrame.spacingSlider:SetWidth(100)
+    condFrame.spacingSlider:SetHeight(16)
+    condFrame.spacingSlider:SetPoint("LEFT", condFrame.spacingLabel, "RIGHT", 10, 0)
+    condFrame.spacingSlider:SetMinMaxValues(0, 100)
+    condFrame.spacingSlider:SetValueStep(1)
+    condFrame.spacingSlider:Hide()
+
+    _G[condFrame.spacingSlider:GetName() .. 'Low']:SetText("0")
+    _G[condFrame.spacingSlider:GetName() .. 'High']:SetText("100")
+    _G[condFrame.spacingSlider:GetName() .. 'Text']:SetText("")
+
+    condFrame.spacingEdit = CreateFrame("EditBox", "DoiteConditions_SpacingEdit", condFrame, "InputBoxTemplate")
+    condFrame.spacingEdit:SetWidth(30)
+    condFrame.spacingEdit:SetHeight(18)
+    condFrame.spacingEdit:SetPoint("LEFT", condFrame.spacingSlider, "RIGHT", 10, 0)
+    condFrame.spacingEdit:SetAutoFocus(false)
+    condFrame.spacingEdit:SetFontObject("GameFontNormalSmall")
+    condFrame.spacingEdit:SetMaxLetters(3)
+    condFrame.spacingEdit:Hide()
+
+    -- Functions to handle updates
+    local function UpdateSpacing(val)
+      if not currentKey then return end
+      local d = EnsureDBEntry(currentKey)
+      d.spacing = val
+      if not val then d.spacing = nil end
+      DoiteGroup.RequestReflow()
+    end
+
+    condFrame.spacingSlider:SetScript("OnValueChanged", function()
+      local val = math.floor(this:GetValue() + 0.5)
+      if condFrame.spacingEdit then
+         condFrame.spacingEdit:SetText(tostring(val))
+      end
+      UpdateSpacing(val)
+    end)
+
+    condFrame.spacingEdit:SetScript("OnEnterPressed", function()
+      this:ClearFocus()
+      local val = tonumber(this:GetText()) or 0
+      if val < 0 then val = 0 end
+      if val > 100 then val = 100 end
+      
+      condFrame.spacingSlider:SetValue(val)
+      UpdateSpacing(val)
+      this:SetText(tostring(val))
+    end)
+
+    condFrame.spacingEdit:SetScript("OnEscapePressed", function()
+      this:ClearFocus()
+      local val = math.floor(condFrame.spacingSlider:GetValue() + 0.5)
+      this:SetText(tostring(val))
+    end)
+
     -- leaderCB click behavior
     condFrame.leaderCB:SetScript("OnClick", function(self)
       local cb = self or (condFrame and condFrame.leaderCB)
@@ -8983,6 +9090,17 @@ function DoiteConditions_Show(key)
           UIDropDownMenu_SetSelectedValue(condFrame.numAurasDD, data.numAuras or 5)
           UIDropDownMenu_SetText(tostring(data.numAuras or 5), condFrame.numAurasDD)
         end
+
+        if condFrame.spacingLabel and condFrame.spacingEdit then
+          condFrame.spacingLabel:Show()
+          condFrame.spacingEdit:Show()
+          local s = data.spacing
+          if not s then
+            local settings = (DoiteAurasDB and DoiteAurasDB.settings)
+            s = (settings and settings.spacing) or 8
+          end
+          condFrame.spacingEdit:SetText(tostring(s))
+        end
       end
 
       SafeRefresh()
@@ -8991,13 +9109,13 @@ function DoiteConditions_Show(key)
     end)
 
     condFrame.groupTitle2 = condFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    condFrame.groupTitle2:SetPoint("TOPLEFT", condFrame, "TOPLEFT", 20, -125)
+    condFrame.groupTitle2:SetPoint("TOPLEFT", condFrame, "TOPLEFT", 20, -165)
     condFrame.groupTitle2:SetText("|cff6FA8DCCONDITIONS & RULES|r")
 
     local sep2 = condFrame:CreateTexture(nil, "ARTWORK")
     sep2:SetHeight(1)
-    sep2:SetPoint("TOPLEFT", condFrame, "TOPLEFT", 16, -140)
-    sep2:SetPoint("TOPRIGHT", condFrame, "TOPRIGHT", -16, -140)
+    sep2:SetPoint("TOPLEFT", condFrame, "TOPLEFT", 16, -180)
+    sep2:SetPoint("TOPRIGHT", condFrame, "TOPRIGHT", -16, -180)
     sep2:SetTexture(1, 1, 1)
     if sep2.SetVertexColor then
       sep2:SetVertexColor(1, 1, 1, 0.25)
@@ -9007,12 +9125,12 @@ function DoiteConditions_Show(key)
 
     if not condFrame.condListContainer then
       local cW = condFrame:GetWidth() - 43
-      local cH = 210
+      local cH = 170
 
       local listContainer = CreateFrame("Frame", nil, condFrame)
       listContainer:SetWidth(cW)
       listContainer:SetHeight(cH)
-      listContainer:SetPoint("TOPLEFT", condFrame, "TOPLEFT", 14, -143)
+      listContainer:SetPoint("TOPLEFT", condFrame, "TOPLEFT", 14, -173)
       listContainer:SetBackdrop({
         bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
         edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
