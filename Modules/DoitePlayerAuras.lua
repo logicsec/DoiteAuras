@@ -289,7 +289,7 @@ end
 BuffAddedFrame:SetScript("OnEvent", function()
   local unitSlot, spellId, stacks = arg2, arg3, arg4
 
-  -- some spells like auras will not use the last open slot and will push down other buffs, check for this
+  -- some spells like passive auras will not use the last open slot and will push down other buffs, check for this
   if DoitePlayerAuras.buffs[unitSlot].spellId then
     UpdateBuffs()
   else
@@ -393,37 +393,66 @@ AuraCastFrame:SetScript("OnEvent", function()
   end
 end)
 
--- Frame for UNIT_CASTEVENT (appears to be unused but keeping for compatibility)
-local UnitCastEventFrame = CreateFrame("Frame", "DoitePlayerAuras_UnitCastEvent")
-UnitCastEventFrame:SetScript("OnEvent", function()
-  local casterGUID = arg1
-  local evType = arg3
-  local spellId = arg4
+-- Shared logic for processing spell casts that may consume stacks or clearcasting
+local function ProcessBuffCappedSpell(spellId, casterGUID, targetGUID)
+  if DoiteBuffData.stackConsumers[spellId] then
+    local modifiedBuffName = DoiteBuffData.stackConsumers[spellId].modifiedBuffName
+    local stackChange = DoiteBuffData.stackConsumers[spellId].stackChange
 
-  if evType == "CAST" and
-      casterGUID == DoitePlayerAuras.playerGuid then
-    if DoiteBuffData.stackConsumers[spellId] then
-      local modifiedBuffName = DoiteBuffData.stackConsumers[spellId].modifiedBuffName
-      local stackChange = DoiteBuffData.stackConsumers[spellId].stackChange
+    local currentStacks = DoitePlayerAuras.cappedBuffsStacks[modifiedBuffName] or 0
 
-      local currentStacks = DoitePlayerAuras.cappedBuffsStacks[modifiedBuffName] or 0
+    if currentStacks and stackChange < 0 and currentStacks > 0 then
+      local newStacks = math.max(0, currentStacks + stackChange)
+      DoitePlayerAuras.cappedBuffsStacks[modifiedBuffName] = newStacks
 
-      if currentStacks and stackChange < 0 and currentStacks > 0 then
-        local newStacks = math.max(0, currentStacks + stackChange)
-        DoitePlayerAuras.cappedBuffsStacks[modifiedBuffName] = newStacks
-
-        if newStacks == 0 then
-          RemoveCappedBuff(modifiedBuffName)
-        end
+      if newStacks == 0 then
+        RemoveCappedBuff(modifiedBuffName)
       end
     end
-    -- check for clearcasting
-    if DoitePlayerAuras.IsHiddenByBuffCap("Clearcasting") and arg2 ~= casterGUID then
-      -- remove clearcasting buff on any spell cast targeting another unit
-      -- not perfect but good enough for now
-      RemoveCappedBuff("Clearcasting")
-    end
   end
+  -- check for clearcasting
+  if DoitePlayerAuras.IsHiddenByBuffCap("Clearcasting") and
+      targetGUID ~= "0x0000000000000000" and
+      targetGUID ~= casterGUID then
+    -- remove clearcasting buff on any spell cast targeting another unit
+    -- not perfect but good enough for now
+    print(tostring(spellId) .. " cast by " .. tostring(casterGUID) .. " on " .. tostring(targetGUID) .. " consumed Clearcasting")
+    RemoveCappedBuff("Clearcasting")
+  end
+end
+
+-- Channeled spells to ignore in SPELL_GO_SELF (handled by SPELL_CHANNEL_START instead)
+local SpellGoIgnoredSpells = {
+  [7268] = true, -- Arcane Missiles Rank 1
+  [7269] = true, -- Arcane Missiles Rank 2
+  [7270] = true, -- Arcane Missiles Rank 3
+  [8419] = true, -- Arcane Missiles Rank 4
+  [8418] = true, -- Arcane Missiles Rank 5
+  [10273] = true, -- Arcane Missiles Rank 6
+  [10274] = true, -- Arcane Missiles Rank 7
+  [25346] = true, -- Arcane Missiles Rank 8
+}
+
+-- Frame for SPELL_GO_SELF event
+local SpellGoSelfFrame = CreateFrame("Frame", "DoitePlayerAuras_SpellGoSelf")
+SpellGoSelfFrame:SetScript("OnEvent", function()
+  local spellId = arg2
+  if SpellGoIgnoredSpells[spellId] then
+    return
+  end
+
+  local casterGUID = arg3
+  local targetGUID = arg4
+  ProcessBuffCappedSpell(spellId, casterGUID, targetGUID)
+end)
+
+-- Frame for SPELL_CHANNEL_START event (fires when player starts or updates a channeled spell)
+local SpellChannelStartFrame = CreateFrame("Frame", "DoitePlayerAuras_SpellChannelStart")
+SpellChannelStartFrame:SetScript("OnEvent", function()
+  local spellId = arg1
+  local targetGUID = arg2 -- from ChannelTargetGuid, "0x0000000000000000" if none
+  -- arg3 = durationMs (unused for stack/clearcasting logic)
+  ProcessBuffCappedSpell(spellId, DoitePlayerAuras.playerGuid, targetGUID)
 end)
 
 function DoitePlayerAuras.RegisterBuffCapEvents()
@@ -432,7 +461,8 @@ function DoitePlayerAuras.RegisterBuffCapEvents()
   end
   DoitePlayerAuras.buffCapEventsEnabled = true
   AuraCastFrame:RegisterEvent("AURA_CAST_ON_SELF")
-  UnitCastEventFrame:RegisterEvent("UNIT_CASTEVENT")
+  SpellGoSelfFrame:RegisterEvent("SPELL_GO_SELF")
+  SpellChannelStartFrame:RegisterEvent("SPELL_CHANNEL_START")
 end
 
 -- Currently unused as it is hard to know when we can safely unregister these events
@@ -443,7 +473,8 @@ function DoitePlayerAuras.UnregisterBuffCapEvents()
   end
   DoitePlayerAuras.buffCapEventsEnabled = false
   AuraCastFrame:UnregisterEvent("AURA_CAST_ON_SELF")
-  UnitCastEventFrame:UnregisterEvent("UNIT_CASTEVENT")
+  SpellGoSelfFrame:UnregisterEvent("SPELL_GO_SELF")
+  SpellChannelStartFrame:UnregisterEvent("SPELL_CHANNEL_START")
 end
 
 function DoitePlayerAuras.ToggleDebugBuffCap()
