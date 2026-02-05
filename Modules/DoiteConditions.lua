@@ -1802,9 +1802,7 @@ end
 
 -- For slider gating: which spells have we actually seen cast?
 _G["Doite_SliderSeen"] = _G["Doite_SliderSeen"] or {}
-local _SliderSeen = _G["Doite_SliderSeen"]
-
-local _SliderNoCastWhitelist = {
+DoiteConditions._SliderNoCastWhitelist = {
   -- Druid
   ["Hurricane"] = true,
   ["Tranquility"] = true,
@@ -1823,7 +1821,7 @@ local function _MarkSliderSeen(spellName)
   if not spellName or spellName == "" then
     return
   end
-  _SliderSeen[spellName] = GetTime() or 0
+  Doite_SliderSeen[spellName] = GetTime() or 0
 end
 
 -- ============================================================
@@ -1835,21 +1833,15 @@ _G.DoiteConditions_ProcWindowDurations = _G.DoiteConditions_ProcWindowDurations 
   ["Surprise Attack"] = 4.0,
   ["Arcane Surge"] = 4.0,
 }
-local _PROC_DUR = _G.DoiteConditions_ProcWindowDurations
-
 -- SpellName -> absolute endTime (GetTime() + duration)
 _G.DoiteConditions_ProcUntil = _G.DoiteConditions_ProcUntil or {}
-local _ProcUntil = _G.DoiteConditions_ProcUntil
-
 -- Per-icon rising-edge detector for "usable proc" icons
 _G.DoiteConditions_ProcLastShowByKey = _G.DoiteConditions_ProcLastShowByKey or {}
-local _ProcLastShowByKey = _G.DoiteConditions_ProcLastShowByKey
-
 local function _ProcWindowDuration(spellName)
   if not spellName then
     return nil
   end
-  local d = _PROC_DUR and _PROC_DUR[spellName]
+  local d = _G.DoiteConditions_ProcWindowDurations and _G.DoiteConditions_ProcWindowDurations[spellName]
   if type(d) == "number" and d > 0 then
     return d
   end
@@ -1860,7 +1852,7 @@ local function _ProcWindowSet(spellName, endTime)
   if not spellName or not endTime then
     return
   end
-  _ProcUntil[spellName] = endTime
+  _G.DoiteConditions_ProcUntil[spellName] = endTime
 
   dirty_ability_time = true
   dirty_ability = true
@@ -1872,7 +1864,7 @@ local function _ProcWindowRemaining(spellName)
   if not spellName then
     return nil
   end
-  local untilT = _ProcUntil and _ProcUntil[spellName]
+  local untilT = _G.DoiteConditions_ProcUntil and _G.DoiteConditions_ProcUntil[spellName]
   if untilT then
     local rem = untilT - (_Now() or 0)
     if rem and rem > 0 then
@@ -1883,9 +1875,7 @@ local function _ProcWindowRemaining(spellName)
 end
 
 -- Keep warrior-specific state for target-matching
-local _OP_until, _OP_target = 0, nil
-local _REV_until = 0
-
+local _WarriorProc = { OP_until = 0, OP_target = nil, REV_until = 0 }
 -- Canonical ability name resolver (spellbook name preferred)
 local function _GetCanonicalSpellNameFromData(data)
   if not data or type(data) ~= "table" then
@@ -1991,12 +1981,12 @@ do
 
       if tgt then
         tgt = str_gsub(tgt, "%s*[%.!%?]+%s*$", "")
-        _OP_target = tgt
+        _WarriorProc.OP_target = tgt
 
         local now = _Now()
         local dur = _ProcWindowDuration("Overpower") or 4.0
-        _OP_until = now + dur
-        _ProcWindowSet("Overpower", _OP_until)
+        _WarriorProc.OP_until = now + dur
+        _ProcWindowSet("Overpower", _WarriorProc.OP_until)
       end
     end)
 
@@ -2019,8 +2009,8 @@ do
 
         local now = _Now()
         local dur = _ProcWindowDuration("Revenge") or 4.0
-        _REV_until = now + dur
-        _ProcWindowSet("Revenge", _REV_until)
+        _WarriorProc.REV_until = now + dur
+        _ProcWindowSet("Revenge", _WarriorProc.REV_until)
 
         dirty_ability = true
       end
@@ -2088,18 +2078,18 @@ end
 
 -- Helpers consumed by ability-usable override
 local function _Warrior_Overpower_OK()
-  if (_Now() > _OP_until) then
+  if (_Now() > _WarriorProc.OP_until) then
     return false
   end
   if not UnitExists("target") then
     return false
   end
   local tname = UnitName("target")
-  return (tname ~= nil and _OP_target ~= nil and tname == _OP_target)
+  return (tname ~= nil and _WarriorProc.OP_target ~= nil and tname == _WarriorProc.OP_target)
 end
 
 local function _Warrior_Revenge_OK()
-  return _Now() <= _REV_until
+  return _Now() <= _WarriorProc.REV_until
 end
 
 -- Remaining proc-window time for Overpower / Revenge (seconds), or nil if no proc
@@ -6145,12 +6135,12 @@ local function _HandleAbilitySlider(key, ca, dataTbl, sliderGuardOk)
   local maxWindow = math.min(3.0, (dur or 0) * 0.6)
 
   -- Last time *this* spell was actually seen cast (UNIT_CASTEVENT -> _MarkSliderSeen)
-  local lastSeen = spellName and _SliderSeen and _SliderSeen[spellName] or nil
+  local lastSeen = spellName and Doite_SliderSeen and Doite_SliderSeen[spellName] or nil
 
   local hasSeenForThisCD = false
 
   if spellName
-      and _SliderNoCastWhitelist[spellName]
+      and DoiteConditions._SliderNoCastWhitelist[spellName]
       and rem and dur and dur > 1.6 then
     -- Whitelisted: trust the *real* cooldown even without UNIT_CASTEVENT.
     hasSeenForThisCD = true
@@ -6247,17 +6237,17 @@ function DoiteConditions:ApplyVisuals(key, show, glow, grey)
       local dur = _ProcWindowDuration(spellName)
 
       if dur then
-        local prev = (_ProcLastShowByKey[key] == true)
+        local prev = (_G.DoiteConditions_ProcLastShowByKey[key] == true)
 
         if show and (not prev) then
           local now = GetTime()
-          local curUntil = _ProcUntil[spellName] or 0
+          local curUntil = _G.DoiteConditions_ProcUntil[spellName] or 0
           if curUntil < now then
             _ProcWindowSet(spellName, now + dur)
           end
         end
 
-        _ProcLastShowByKey[key] = (show == true) and true or false
+        _G.DoiteConditions_ProcLastShowByKey[key] = (show == true) and true or false
       end
     end
   end
@@ -6720,19 +6710,19 @@ local function _WarriorProcTick()
   if not _isWarrior then
     return
   end
-  if _REV_until <= 0 and _OP_until <= 0 then
+  if _WarriorProc.REV_until <= 0 and _WarriorProc.OP_until <= 0 then
     return
   end
 
   local nowAbs = GetTime()
 
-  if _REV_until > 0 and nowAbs > _REV_until then
-    _REV_until = 0
+  if _WarriorProc.REV_until > 0 and nowAbs > _WarriorProc.REV_until then
+    _WarriorProc.REV_until = 0
     dirty_ability = true
   end
 
-  if _OP_until > 0 and nowAbs > _OP_until then
-    _OP_until = 0
+  if _WarriorProc.OP_until > 0 and nowAbs > _WarriorProc.OP_until then
+    _WarriorProc.OP_until = 0
     dirty_ability = true
   end
 end

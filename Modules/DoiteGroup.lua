@@ -371,22 +371,7 @@ local function ComputeGroupLayout(entries, groupName)
       s = s + 1
     end
 
-    local f = _GetIconFrame(e.key)
-    if f then
-      f._daBlockedByGroup = false
-      -- Do not re-anchor while the slider owns the frame this tick OR if dragging
-      if not f._daSliding and not f._daDragging then
-        if f._daGroupX ~= curX or f._daGroupY ~= curY then
-          f._daGroupX = curX
-          f._daGroupY = curY
-          f:ClearAllPoints()
-          f:SetPoint("CENTER", UIParent, "CENTER", curX, curY)
-        end
-      end
-      if f._daGroupSize ~= baseSize then
-        f._daGroupSize = baseSize
-        f:SetWidth(baseSize)
-        f:SetHeight(baseSize)
+    -- Place visible-known entries into their fixed slots (up to limit).
     local p = 0
     local v = 1
     while v <= vn do
@@ -394,13 +379,44 @@ local function ComputeGroupLayout(entries, groupName)
       local slot = e and e._daFixedSlot
       if slot and slot <= limit then
         local curX, curY = _ComputeOffset(baseX, baseY, growth, pad, slot - 1)
-        _ApplyPlacement(e, curX, curY, baseSize)
+
+        -- Inline placement so we can respect _daDragging (avoid fighting the drag owner).
+        local pos = e._computedPos
+        if not pos then
+          pos = {}
+          e._computedPos = pos
+        end
+        pos.x = curX
+        pos.y = curY
+        pos.size = baseSize
+
+        local f = _GetIconFrame(e.key)
+        if f then
+          f._daBlockedByGroup = false
+
+          -- Do not re-anchor while sliding OR dragging
+          if not f._daSliding and not f._daDragging then
+            if f._daGroupX ~= curX or f._daGroupY ~= curY then
+              f._daGroupX = curX
+              f._daGroupY = curY
+              f:ClearAllPoints()
+              f:SetPoint("CENTER", UIParent, "CENTER", curX, curY)
+            end
+          end
+
+          if f._daGroupSize ~= baseSize then
+            f._daGroupSize = baseSize
+            f:SetWidth(baseSize)
+            f:SetHeight(baseSize)
+          end
+        end
 
         p = p + 1
         placed[p] = e
       end
       v = v + 1
     end
+
     actualPlaced = p
   else
     local curX, curY = baseX, baseY
