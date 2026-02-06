@@ -9102,6 +9102,17 @@ function DoiteConditions_Show(key)
     condFrame:SetFrameStrata("FULLSCREEN_DIALOG")
     -- When the conditions editor hides by any means, drop the edit override
     condFrame:SetScript("OnHide", function()
+      -- Disable mouse on the icon that was being edited (fixes drag after exit bug)
+      local _GetIconFrame = DoiteAuras_GetIconFrame or function(k)
+        return k and _G["DoiteIcon_" .. k]
+      end
+      if currentKey then
+        local oldFrame = _GetIconFrame(currentKey)
+        if oldFrame then
+          oldFrame:EnableMouse(false)
+        end
+      end
+
       _G["DoiteEdit_CurrentKey"] = nil
       lastAnnouncedKey = nil
 
