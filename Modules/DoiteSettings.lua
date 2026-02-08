@@ -91,11 +91,84 @@ local function DS_CreateSettingsFrame()
 	
 	-- Coming soon text (center body)
     local coming = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    coming:SetPoint("TOPLEFT", f, "TOPLEFT", 20, -55)
+    coming:SetPoint("TOPLEFT", f, "TOPLEFT", 20, -75)
     coming:SetWidth(210)
     coming:SetJustifyH("LEFT")
     coming:SetJustifyV("TOP")
-    coming:SetText("Settings coming:\n\n* Padding for icons (screen)\n* Padding between icons (dynamic group)\n* Soon of CD (Range for sliders & Time)\n* Skins on the icon frames maybe\n* Refresh rate for certain rebuilds (like group)")
+    coming:SetText("Settings coming:\n\n* Padding for icons (screen)\n* Soon of CD (Range for sliders & Time)\n* Refresh rate for certain rebuilds (like group)")
+
+    ---------------------------------------------------------------
+    -- pfUI border toggle
+    ---------------------------------------------------------------
+    local pfuiBorderBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    pfuiBorderBtn:SetWidth(120)
+    pfuiBorderBtn:SetHeight(20)
+    pfuiBorderBtn:SetPoint("TOPLEFT", f, "TOPLEFT", 20, -50)
+
+    local function DS_HasPfUI()
+        if type(DoiteAuras_HasPfUI) == "function" then
+            return DoiteAuras_HasPfUI() == true
+        end
+        return false
+    end
+
+    local function DS_UpdatePfUIButton()
+        local hasPfUI = DS_HasPfUI()
+
+		-- If pfUI exists and the user has no saved choice yet, default ON
+		if hasPfUI and DoiteAurasDB and DoiteAurasDB.pfuiBorder == nil then
+			DoiteAurasDB.pfuiBorder = true
+		end
+
+        -- If pfUI is missing: force OFF first
+        if not hasPfUI then
+            if DoiteAurasDB then
+                DoiteAurasDB.pfuiBorder = false
+            end
+        end
+
+        -- set label from the final state
+        if DoiteAurasDB and DoiteAurasDB.pfuiBorder == true then
+            pfuiBorderBtn:SetText("pfUI icons: ON")
+        else
+            pfuiBorderBtn:SetText("pfUI icons: OFF")
+        end
+
+        -- Disable + grey when pfUI missing
+        if not hasPfUI then
+            if pfuiBorderBtn.Disable then pfuiBorderBtn:Disable() end
+
+            local fs = pfuiBorderBtn.GetFontString and pfuiBorderBtn:GetFontString()
+            if fs and fs.SetTextColor then
+                fs:SetTextColor(0.6, 0.6, 0.6)
+            end
+        else
+            if pfuiBorderBtn.Enable then pfuiBorderBtn:Enable() end
+
+            local fs = pfuiBorderBtn.GetFontString and pfuiBorderBtn:GetFontString()
+            if fs and fs.SetTextColor then
+                fs:SetTextColor(1, 0.82, 0)
+            end
+        end
+    end
+
+    pfuiBorderBtn:SetScript("OnClick", function()
+        if not DS_HasPfUI() then
+            return
+        end
+
+        DoiteAurasDB.pfuiBorder = not (DoiteAurasDB.pfuiBorder == true)
+        DS_UpdatePfUIButton()
+
+        if type(DoiteAuras_ApplyBorderToAllIcons) == "function" then
+            DoiteAuras_ApplyBorderToAllIcons()
+        end
+        if DoiteAuras_RefreshIcons then
+            pcall(DoiteAuras_RefreshIcons)
+        end
+    end)
+
+    DS_UpdatePfUIButton()
 
     -- OnShow: enforce exclusivity + top-most
     f:SetScript("OnShow", function()

@@ -13,7 +13,7 @@ DoiteAurasDB.spells         = DoiteAurasDB.spells         or {}
 DoiteAurasDB.cache          = DoiteAurasDB.cache          or {}
 DoiteAurasDB.groupSort      = DoiteAurasDB.groupSort      or {}
 DoiteAurasDB.bucketDisabled = DoiteAurasDB.bucketDisabled or {}
-DoiteAurasDB.pfuiBorder     = DoiteAurasDB.pfuiBorder     or false
+DoiteAurasDB.pfuiBorder     = DoiteAurasDB.pfuiBorder
 DoiteAuras = DoiteAuras or {}
 
 -- Always return a valid name->texture cache table
@@ -27,21 +27,31 @@ end
 -- pfUI Border Styling Helpers
 ---------------------------------------------------------------
 local function DA_IsPfUIAvailable()
-    return pfUI and pfUI.api and pfUI.api.CreateBackdrop
+    if type(IsAddOnLoaded) ~= "function" then
+        return false
+    end
+    local ok = IsAddOnLoaded("pfUI")
+    return (ok == 1 or ok == true)
 end
 
+-- Callable from other addon files
+function DoiteAuras_HasPfUI()
+    return DA_IsPfUIAvailable() == true
+end
+
+-- Apply/remove helpers (callable; safe no-ops if pfUI is missing)
 local function DA_ApplyPfUIBorder(frame)
     if not frame or not DA_IsPfUIAvailable() then return end
-    
+
     -- Remove existing backdrop if any
     if frame.backdrop then
         frame.backdrop:Hide()
         frame.backdrop = nil
     end
-    
+
     -- Apply pfUI backdrop
     pfUI.api.CreateBackdrop(frame)
-    
+
     -- Apply texture cropping to icon
     if frame.icon and frame.icon.SetTexCoord then
         frame.icon:SetTexCoord(.08, .92, .08, .92)
@@ -50,26 +60,22 @@ end
 
 local function DA_RemovePfUIBorder(frame)
     if not frame then return end
-    
-    -- Remove pfUI backdrop
+
     if frame.backdrop then
         frame.backdrop:Hide()
         frame.backdrop = nil
     end
-    
-    -- Restore full texture coordinates
+
     if frame.icon and frame.icon.SetTexCoord then
         frame.icon:SetTexCoord(0, 1, 0, 1)
     end
 end
 
 local function DA_ApplyBorderToAllIcons()
-    local usePfUI = DoiteAurasDB.pfuiBorder
-    
-    -- Iterate through all existing icon frames
+    local usePfUI = (DoiteAurasDB and DoiteAurasDB.pfuiBorder) == true
+
     for key, _ in pairs(DoiteAurasDB.spells or {}) do
-        local globalName = "DoiteIcon_" .. key
-        local f = _G[globalName]
+        local f = _G["DoiteIcon_" .. key]
         if f then
             if usePfUI then
                 DA_ApplyPfUIBorder(f)
@@ -77,6 +83,21 @@ local function DA_ApplyBorderToAllIcons()
                 DA_RemovePfUIBorder(f)
             end
         end
+    end
+end
+
+-- Export callable functions for other addon files
+function DoiteAuras_ApplyBorderToAllIcons() DA_ApplyBorderToAllIcons() end
+
+-- Enforce default/forced state:
+-- - If pfUI missing: force OFF
+-- - If unset (nil) and pfUI available: default ON
+do
+    local has = DA_IsPfUIAvailable()
+    if not has then
+        DoiteAurasDB.pfuiBorder = false
+    elseif DoiteAurasDB.pfuiBorder == nil then
+        DoiteAurasDB.pfuiBorder = true
     end
 end
 
@@ -1285,50 +1306,6 @@ testAllBtn:SetScript("OnClick", function()
 end)
 
 _DA_UpdateTestAllButton()
-
--- pfUI Border toggle button
-local pfuiBorderBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-pfuiBorderBtn:SetWidth(120)
-pfuiBorderBtn:SetHeight(18)
-pfuiBorderBtn:SetPoint("LEFT", testAllBtn, "RIGHT", 4, 0)
-
-local function _DA_UpdatePfUIBorderButton()
-    if DoiteAurasDB.pfuiBorder then
-        pfuiBorderBtn:SetText("PFUI Border: ON")
-    else
-        pfuiBorderBtn:SetText("PFUI Border: OFF")
-    end
-end
-
-pfuiBorderBtn:SetScript("OnClick", function()
-    -- Toggle the setting
-    DoiteAurasDB.pfuiBorder = not DoiteAurasDB.pfuiBorder
-    
-    -- Update button text
-    _DA_UpdatePfUIBorderButton()
-    
-    -- Check if pfUI is available and show appropriate message
-    local status = DoiteAurasDB.pfuiBorder and "ON" or "OFF"
-    local chatMsg
-    
-    if not DA_IsPfUIAvailable() and DoiteAurasDB.pfuiBorder then
-        chatMsg = "|cff6FA8DCDoiteAuras:|r PFUI Border toggled " .. status .. ". |cffff0000Warning:|r pfUI addon not detected. Borders will not display correctly without pfUI installed. /reload to apply changes."
-    else
-        chatMsg = "|cff6FA8DCDoiteAuras:|r PFUI Border toggled " .. status .. ". Please /reload to apply changes to all icons."
-    end
-    
-    (DEFAULT_CHAT_FRAME or ChatFrame1):AddMessage(chatMsg)
-end)
-
-_DA_UpdatePfUIBorderButton()
-
--- Grey out the button visually if pfUI is not available (but keep it clickable)
-if not DA_IsPfUIAvailable() then
-    -- Grey out the button text
-    if pfuiBorderBtn.GetFontString and pfuiBorderBtn:GetFontString() and pfuiBorderBtn:GetFontString().SetTextColor then
-        pfuiBorderBtn:GetFontString():SetTextColor(0.5, 0.5, 0.5)
-    end
-end
 
 -- Guide text
 local guide = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
