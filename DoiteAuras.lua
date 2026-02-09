@@ -11,9 +11,10 @@ if DoiteAurasFrame then return end
 DoiteAurasDB = DoiteAurasDB or {}
 DoiteAurasDB.spells         = DoiteAurasDB.spells         or {}
 DoiteAurasDB.cache          = DoiteAurasDB.cache          or {}
-DoiteAurasDB.groupSort      = DoiteAurasDB.groupSort      or {}
-DoiteAurasDB.bucketDisabled = DoiteAurasDB.bucketDisabled or {}
-DoiteAurasDB.pfuiBorder     = DoiteAurasDB.pfuiBorder
+DoiteAurasDB.groupSort       = DoiteAurasDB.groupSort       or {}
+DoiteAurasDB.bucketDisabled  = DoiteAurasDB.bucketDisabled  or {}
+DoiteAurasDB.bucketCollapsed = DoiteAurasDB.bucketCollapsed or {}
+DoiteAurasDB.pfuiBorder      = DoiteAurasDB.pfuiBorder
 DoiteAuras = DoiteAuras or {}
 
 -- Always return a valid name->texture cache table
@@ -39,7 +40,7 @@ function DoiteAuras_HasPfUI()
     return DA_IsPfUIAvailable() == true
 end
 
--- Apply/remove helpers (callable; safe no-ops if pfUI is missing)
+-- Apply/remove helpers
 local function DA_ApplyPfUIBorder(frame)
     if not frame or not DA_IsPfUIAvailable() then return end
 
@@ -160,6 +161,12 @@ local function DA_GetMissingRequiredMods()
   end
   if not hasUnitXP then
     table.insert(missing, "UnitXP SP3")
+  end
+  
+  -- SuperWoW: SUPERWOW_VERSION must be a non-empty string
+  local hasSuper = (type(SUPERWOW_VERSION) == "string" and SUPERWOW_VERSION ~= "")
+  if not hasSuper then
+    table.insert(missing, "SuperWoW")
   end
 
   return missing
@@ -1355,7 +1362,7 @@ local function GetOrderedSpells()
     return list
 end
 
--- One shared comparator (avoids allocating a new closure in hot paths that sort by order).
+-- One shared comparator
 if DoiteAuras and not DoiteAuras._cmpSpellKeyByOrder then
     DoiteAuras._cmpSpellKeyByOrder = function(a, b)
         local da = DoiteAurasDB.spells[a]
@@ -1456,6 +1463,23 @@ local function DA_IsBucketDisabled(bucketKey)
     if not bucketKey then return false end
     if not DoiteAurasDB or not DoiteAurasDB.bucketDisabled then return false end
     return DoiteAurasDB.bucketDisabled[bucketKey] == true
+end
+
+-- Accordion collapse helpers
+local function DA_IsBucketCollapsed(bucketKey)
+    if not bucketKey then return false end
+    DoiteAurasDB.bucketCollapsed = DoiteAurasDB.bucketCollapsed or {}
+    return DoiteAurasDB.bucketCollapsed[bucketKey] == true
+end
+
+local function DA_SetBucketCollapsed(bucketKey, collapsed)
+    if not bucketKey then return end
+    DoiteAurasDB.bucketCollapsed = DoiteAurasDB.bucketCollapsed or {}
+    if collapsed then
+        DoiteAurasDB.bucketCollapsed[bucketKey] = true
+    else
+        DoiteAurasDB.bucketCollapsed[bucketKey] = nil
+    end
 end
 
 local function DoiteAuras_IsKeyDisabled(key)
@@ -1623,37 +1647,51 @@ local function DA_BuildDisplayList(ordered)
     local display = {}
 
     local _, groupName
-    for _, groupName in ipairs(groupOrderList) do
-        table.insert(display, { isHeader = true, groupName = groupName, kind = "group" })
-        local list = groupedByName[groupName]
-        local j
-        for j = 1, table.getn(list) do
-            table.insert(display, list[j])
-        end
-    end
+	for _, groupName in ipairs(groupOrderList) do
+		table.insert(display, { isHeader = true, groupName = groupName, kind = "group" })
 
-    for _, catName in ipairs(categoryOrderList) do
-        table.insert(display, { isHeader = true, groupName = catName, kind = "category" })
-        local list = categorizedByName[catName]
-        local j
-        for j = 1, table.getn(list) do
-            table.insert(display, list[j])
-        end
-    end
+		-- Accordion: only add members when not collapsed
+		if not DA_IsBucketCollapsed(groupName) then
+			local list = groupedByName[groupName]
+			local j
+			for j = 1, table.getn(list) do
+				table.insert(display, list[j])
+			end
+		end
+	end
+
+	for _, catName in ipairs(categoryOrderList) do
+		table.insert(display, { isHeader = true, groupName = catName, kind = "category" })
+
+		-- Accordion: only add members when not collapsed
+		if not DA_IsBucketCollapsed(catName) then
+			local list = categorizedByName[catName]
+			local j
+			for j = 1, table.getn(list) do
+				table.insert(display, list[j])
+			end
+		end
+	end
 
     local showUngroupedHeader = false
     if unTotal > 0 and (table.getn(groupOrderList) > 0 or table.getn(categoryOrderList) > 0) then
         showUngroupedHeader = true
     end
 
-    if showUngroupedHeader then
-        table.insert(display, { isHeader = true, groupName = "Ungrouped/Uncategorized", kind = "ungrouped" })
-    end
+	if showUngroupedHeader then
+		table.insert(display, { isHeader = true, groupName = "Ungrouped/Uncategorized", kind = "ungrouped" })
+	end
 
-    local j
-    for j = 1, unTotal do
-        table.insert(display, ungrouped[j])
-    end
+	-- Accordion key for ungrouped bucket
+	local unKey = "Ungrouped"
+
+	-- Only add ungrouped entries when not collapsed
+	if not (showUngroupedHeader and DA_IsBucketCollapsed(unKey)) then
+		local j
+		for j = 1, unTotal do
+			table.insert(display, ungrouped[j])
+		end
+	end
 
     return display
 end
@@ -2070,7 +2108,7 @@ local function RefreshIcons()
         DoiteAuras._spellSlotCache = slotCache
     end
 
-    -- Build leader-size map so grouped followers can inherit the leader's size
+    -- Build leader maps so grouped followers can inherit leader size and have a sane temp anchor
     local leaderSizeByGroup = DoiteAuras._leaderSizeByGroup
     if not leaderSizeByGroup then
         leaderSizeByGroup = {}
@@ -2082,11 +2120,26 @@ local function RefreshIcons()
         end
     end
 
+    local leaderPosByGroup = DoiteAuras._leaderPosByGroup
+    if not leaderPosByGroup then
+        leaderPosByGroup = {}
+        DoiteAuras._leaderPosByGroup = leaderPosByGroup
+    else
+        local k
+        for k in pairs(leaderPosByGroup) do
+            leaderPosByGroup[k] = nil
+        end
+    end
+
     for i = 1, total do
         local key  = keyList[i]
         local data = DoiteAurasDB.spells[key]
         if data and data.group and data.group ~= "" and data.group ~= "no" and data.isLeader == true then
             leaderSizeByGroup[data.group] = (data.iconSize or data.size) or 36
+
+            local lx = (data.x or data.offsetX) or 0
+            local ly = (data.y or data.offsetY) or 0
+            leaderPosByGroup[data.group] = { x = lx, y = ly }
         end
     end
 
@@ -2335,18 +2388,25 @@ local function RefreshIcons()
         f:SetAlpha((data and data.alpha) or 1)
         f:SetWidth(size); f:SetHeight(size)
 
-        -- Do not re-anchor while a slide preview owns the frame for this tick
-        -- AND do not re-anchor if this frame is currently being dragged (prevents snapping back)
+        -- Do not re-anchor while a slide preview owns the frame for this tick AND do not re-anchor if this frame is currently being dragged (prevents snapping back)
         local isDraggingThis = (f._daDragging == true)
         if not f._daSliding and not isDraggingThis then
-            f:ClearAllPoints()
-            -- logicsec: Use saved Center-Relative points
-            if posX and posY then
-                 -- Computed position (grouped) OR Saved Position
-                 f:SetPoint("CENTER", UIParent, "CENTER", posX, posY)
+            -- If this is a grouped follower and don't computed layout yet, do NOT snap to its own saved coords (often 0,0). Use leader saved coords as a temp anchor.
+            if isGrouped and (not isLeader) and (not posX) then
+                local lp = (leaderPosByGroup and data and data.group) and leaderPosByGroup[data.group]
+                if lp and lp.x and lp.y then
+                    f:ClearAllPoints()
+                    f:SetPoint("CENTER", UIParent, "CENTER", lp.x, lp.y)
+                else
+                    -- No leader position found: keep current points as-is. (Do not ClearAllPoints / SetPoint here.)
+                end
             else
-                 -- Fallback (should have been covered by posX/posY logic above)
-                 f:SetPoint("CENTER", UIParent, "CENTER", savedX, savedY)
+                f:ClearAllPoints()
+                if posX and posY then
+                    f:SetPoint("CENTER", UIParent, "CENTER", posX, posY)
+                else
+                    f:SetPoint("CENTER", UIParent, "CENTER", savedX, savedY)
+                end
             end
         end
 
@@ -2504,7 +2564,25 @@ local function RefreshList()
                 hdr.bg:SetTexture(1, 1, 1, 0.06)
 
                 hdr.label = hdr:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-                hdr.label:SetPoint("LEFT", hdr, "LEFT", 5, 0)
+                hdr.label:SetPoint("LEFT", hdr, "LEFT", 22, 0)
+				-- Accordion toggle (+ / -)
+				hdr.toggleBtn = CreateFrame("Button", nil, hdr, "UIPanelButtonTemplate")
+				hdr.toggleBtn:SetWidth(16); hdr.toggleBtn:SetHeight(16)
+				hdr.toggleBtn:SetPoint("LEFT", hdr, "LEFT", 3, 0)
+				hdr.toggleBtn:SetText("-")
+				hdr.toggleBtn:SetScript("OnClick", function()
+					local p = this:GetParent()
+					local bk = p and p.bucketKey
+					if not bk then return end
+
+					local collapsed = DA_IsBucketCollapsed(bk)
+					DA_SetBucketCollapsed(bk, not collapsed)
+
+					-- Rebuild list so it collapses/expands
+					if DoiteAuras_RefreshList then
+						pcall(DoiteAuras_RefreshList)
+					end
+				end)
 
                 -- Disable checkbox (created once; shown/hidden per header)
                 hdr.disableCheck = CreateFrame("CheckButton", nil, hdr, "UICheckButtonTemplate")
@@ -2649,14 +2727,25 @@ local function RefreshList()
             hdr.bucketKey = DA_GetBucketKeyForHeaderEntry(entry)
             DoiteAurasDB.bucketDisabled = DoiteAurasDB.bucketDisabled or {}
 
-            if hdr.bucketKey then
-                hdr.disableCheck:ClearAllPoints()
-                hdr.disableCheck:SetPoint("RIGHT", hdr, "RIGHT", -45, 0)
-                hdr.disableCheck:Show()
-                hdr.disableCheck:SetChecked(DoiteAurasDB.bucketDisabled[hdr.bucketKey] == true)
-            else
-                hdr.disableCheck:Hide()
-            end
+			if hdr.bucketKey then
+				hdr.disableCheck:ClearAllPoints()
+				hdr.disableCheck:SetPoint("RIGHT", hdr, "RIGHT", -45, 0)
+				hdr.disableCheck:Show()
+				hdr.disableCheck:SetChecked(DoiteAurasDB.bucketDisabled[hdr.bucketKey] == true)
+
+				-- Accordion toggle text
+				if hdr.toggleBtn then
+					if DA_IsBucketCollapsed(hdr.bucketKey) then
+						hdr.toggleBtn:SetText("+")
+					else
+						hdr.toggleBtn:SetText("-")
+					end
+					hdr.toggleBtn:Show()
+				end
+			else
+				hdr.disableCheck:Hide()
+				if hdr.toggleBtn then hdr.toggleBtn:Hide() end
+			end
 
             -- Group sort controls (only for group headers)
             if entry.kind == "group" and hdr.groupName and hdr.groupName ~= "" then
@@ -3462,7 +3551,7 @@ _daLoad:SetScript("OnEvent", function()
       else
         -- One or more missing → modern client requirement message
         local list = table.concat(missing, ", ")
-        cf:AddMessage("|cff6FA8DCDoiteAuras:|r This addon requires Nampower 2.25.0+ and UnitXP SP3. Missing: " .. list .. ".")
+        cf:AddMessage("|cff6FA8DCDoiteAuras:|r This addon requires Nampower 2.25.0+, UnitXP SP3 and SuperWoW. Missing: " .. list .. ".")
         -- BLOCKER: after printing the message, hard-disable the addon
         _G["DoiteAuras_HardDisabled"] = true
 

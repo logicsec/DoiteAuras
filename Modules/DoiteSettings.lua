@@ -101,7 +101,7 @@ local function DS_CreateSettingsFrame()
     -- pfUI border toggle
     ---------------------------------------------------------------
     local pfuiBorderBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    pfuiBorderBtn:SetWidth(120)
+    pfuiBorderBtn:SetWidth(100)
     pfuiBorderBtn:SetHeight(20)
     pfuiBorderBtn:SetPoint("TOPLEFT", f, "TOPLEFT", 20, -50)
 
