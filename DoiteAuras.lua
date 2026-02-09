@@ -91,15 +91,48 @@ end
 function DoiteAuras_ApplyBorderToAllIcons() DA_ApplyBorderToAllIcons() end
 
 -- Enforce default/forced state:
--- - If pfUI missing: force OFF
--- - If unset (nil) and pfUI available: default ON
-do
+-- - If pfUI is available and pfuiBorder is unset (nil): default ON
+-- - If pfUI is NOT available and pfuiBorder is unset (nil): default OFF
+local function DA_EnsurePfUIBorderDefault()
+    DoiteAurasDB = DoiteAurasDB or {}
+
     local has = DA_IsPfUIAvailable()
-    if not has then
-        DoiteAurasDB.pfuiBorder = false
-    elseif DoiteAurasDB.pfuiBorder == nil then
-        DoiteAurasDB.pfuiBorder = true
+
+    -- Only set a default when the user has NOT chosen anything yet
+    if DoiteAurasDB.pfuiBorder == nil then
+        if has then
+            DoiteAurasDB.pfuiBorder = true
+        else
+            DoiteAurasDB.pfuiBorder = false
+        end
     end
+
+    -- If pfUI is available now, make sure existing icons match the setting
+    if has and DoiteAuras_ApplyBorderToAllIcons then
+        pcall(DoiteAuras_ApplyBorderToAllIcons)
+    end
+end
+
+-- Run once shortly after entering world, and also when pfUI loads
+do
+    local f = CreateFrame("Frame", "DoiteAurasPfUIInit")
+    f:RegisterEvent("PLAYER_ENTERING_WORLD")
+    f:RegisterEvent("ADDON_LOADED")
+    f:SetScript("OnEvent", function()
+        if event == "ADDON_LOADED" then
+            -- If pfUI loads after DoiteAuras, default+apply then
+            if arg1 == "pfUI" then
+                DA_EnsurePfUIBorderDefault()
+            end
+            return
+        end
+
+        -- PLAYER_ENTERING_WORLD
+        if event == "PLAYER_ENTERING_WORLD" then
+            DA_EnsurePfUIBorderDefault()
+            this:UnregisterEvent("PLAYER_ENTERING_WORLD")
+        end
+    end)
 end
 
 ---------------------------------------------------------------
