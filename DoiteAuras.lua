@@ -470,7 +470,7 @@ if sep.SetVertexColor then sep:SetVertexColor(1,1,1,0.25) end
 -- Intro text
 local intro = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 intro:SetPoint("TOPLEFT", frame, "TOPLEFT", 20, -40)
-intro:SetText("Enter the EXACT name or spell ID of the buff or debuff.")
+intro:SetText("Enter the name (generic name-match) or via spell ID (unique):")
 
 -- Close button
 local closeBtn = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
@@ -1117,7 +1117,7 @@ local function DA_UpdateTypeUI()
 
     elseif currentType == "Buff" or currentType == "Debuff" then
         -- Buffs/Debuffs: manual text input
-        intro:SetText("Enter the EXACT name or spell ID of the buff or debuff.")
+        intro:SetText("Enter the name (generic name-match) or via spell ID (unique):")
         input:Show()
         if abilityDropDown then abilityDropDown:Hide() end
         if itemDropDown then itemDropDown:Hide() end
@@ -2009,9 +2009,6 @@ local function CreateOrUpdateIcon(key, layer)
             if data then
                 data.point = "CENTER"
                 data.relativePoint = "CENTER"
-                data.x = x
-                data.y = y
-                -- Legacy fields sync
                 data.offsetX = x
                 data.offsetY = y
             end
@@ -2170,8 +2167,8 @@ local function RefreshIcons()
         if data and data.group and data.group ~= "" and data.group ~= "no" and data.isLeader == true then
             leaderSizeByGroup[data.group] = (data.iconSize or data.size) or 36
 
-            local lx = (data.x or data.offsetX) or 0
-            local ly = (data.y or data.offsetY) or 0
+            local lx = (data.offsetX) or 0
+            local ly = (data.offsetY) or 0
             leaderPosByGroup[data.group] = { x = lx, y = ly }
         end
     end
@@ -2413,8 +2410,8 @@ local function RefreshIcons()
 
         local savedPoint = (data and data.point) or "CENTER"
         local savedRelPoint = (data and data.relativePoint) or "CENTER"
-        local savedX = (data and (data.x or data.offsetX)) or 0
-        local savedY = (data and (data.y or data.offsetY)) or 0
+        local savedX = (data and data.offsetX) or 0
+        local savedY = (data and data.offsetY) or 0
 
 
         f:SetScale((data and data.scale) or 1)
@@ -2831,7 +2828,7 @@ local function RefreshList()
         else
             local key, data = entry.key, entry.data
             if key and data then
-                local display = data.displayName or key
+                local display = (data.shownName and data.shownName ~= "" and data.shownName) or (data.displayName or key)
                 -- show "(i/N)" only if N > 1 (duplicates of same name+type)
                 if entry._groupCnt and entry._groupCnt > 1 then
                     display = string.format("%s (%d/%d)", display, entry._groupIdx, entry._groupCnt)
@@ -3082,11 +3079,41 @@ addBtn:SetScript("OnClick", function()
 
   -- Detect pure numeric Buff/Debuff input as "spell ID mode"
   local spellIdStr = nil
+  local shownName  = nil
+
   if (t == "Buff" or t == "Debuff") and not isSpecialHeader then
       if string.find(name, "^(%d+)$") then
           spellIdStr = name
-          -- UI label while not knowing know the real spell name
-          name = "Spell ID: " .. spellIdStr .. " (will update when seen)"
+
+          -- Nampower: resolve spell name + rank immediately
+          local resolvedSpellName = nil
+          local resolvedSpellRank = nil
+
+          if type(GetSpellNameAndRankForId) == "function" then
+              local ok, sn, sr = pcall(GetSpellNameAndRankForId, tonumber(spellIdStr))
+              if ok and sn and sn ~= "" then
+                  resolvedSpellName = tostring(sn)
+                  if sr and sr ~= "" then
+                      resolvedSpellRank = tostring(sr) -- "Rank 1"
+                  end
+              end
+          end
+
+          if resolvedSpellName then
+              -- Matching name (same as adding by name)
+              name = resolvedSpellName
+
+              -- Pretty list label (your current behavior, but stored separately)
+              if resolvedSpellRank then
+                  shownName = resolvedSpellName .. " [" .. resolvedSpellRank .. "] - ID: " .. spellIdStr
+              else
+                  shownName = resolvedSpellName .. " - ID: " .. spellIdStr
+              end
+          else
+              -- Fallback if resolver isn't available yet
+              shownName = "Spell ID: " .. spellIdStr .. " (will update when seen)"
+              name = shownName
+          end
       end
   end
 
@@ -3153,6 +3180,7 @@ addBtn:SetScript("OnClick", function()
     order       = nextOrder,
     type        = t,
     displayName = name,
+    shownName   = shownName,
     baseKey     = baseKey,
     uid         = instanceIdx,
   }
@@ -3163,9 +3191,20 @@ addBtn:SetScript("OnClick", function()
   -- If this was created by spell ID, persist it so DoiteConditions can resolve it by ID.
   if spellIdStr then
       entry.spellid = spellIdStr
+      entry.Addedviaspellid = true
   end
 
-  -- Auto-prime texture
+  -- Auto-prime texture: SpellID-added Buff/Debuff: try Nampower icon lookup immediately. If it returns nil, do NOTHING here so the existing fallback logic below (cache/siblings) and DoiteConditions "seen" updates remain unchanged.
+  if spellIdStr then
+      if type(GetItemIconTexture) == "function" then
+          local ok, tex = pcall(GetItemIconTexture, tonumber(spellIdStr))
+          if ok and tex and tex ~= "" then
+              cache[name]       = tex
+              entry.iconTexture = tex
+          end
+      end
+  end
+
   if t == "Ability" then
     local slot = FindSpellBookSlot(name)
     if slot and GetSpellTexture then
@@ -3336,7 +3375,7 @@ SLASH_DOITEAURAS3="/doiteaura"
 SLASH_DOITEAURAS4="/doite"
 
 SlashCmdList["DOITEAURAS"] = function(msg)
-  -- msg is a plain string in 1.12, no methods on it
+  -- msg is a plain string, no methods on it
   msg = msg or ""
   msg = string.lower(msg)
 
