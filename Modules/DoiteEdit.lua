@@ -1699,7 +1699,7 @@ local function CreateConditionsUI()
 
   -- Ability: dynamic Aura Conditions section
   local abilityAuraBaseY = row12_y
-  SetSeparator("ability", 12, "EXTRA: VISIBILITY CONDITIONS", true, true)
+  SetSeparator("ability", 12, "EXTRA: VISIBILITY (SHOW/HIDE) CONDITIONS", true, true)
   condFrame.abilityAuraAnchor = CreateFrame("Frame", nil, _Parent())
   condFrame.abilityAuraAnchor:SetPoint("TOPLEFT", _Parent(), "TOPLEFT", 0, abilityAuraBaseY)
   condFrame.abilityAuraAnchor:SetPoint("TOPRIGHT", _Parent(), "TOPRIGHT", 0, abilityAuraBaseY)
@@ -1707,7 +1707,7 @@ local function CreateConditionsUI()
 
   -- Ability: dynamic Visual Effects Conditions section
   local abilityVfxBaseY = row13_y
-  SetSeparator("ability", 13, "EXTRA: VISUAL EFFECTS CONDITIONS", true, true)
+  SetSeparator("ability", 13, "EXTRA: VISUAL EFFECT (GLOW/GREY) CONDITIONS", true, true)
   condFrame.abilityVfxAnchor = CreateFrame("Frame", nil, _Parent())
   condFrame.abilityVfxAnchor:SetPoint("TOPLEFT", _Parent(), "TOPLEFT", 0, abilityVfxBaseY)
   condFrame.abilityVfxAnchor:SetPoint("TOPRIGHT", _Parent(), "TOPRIGHT", 0, abilityVfxBaseY)
@@ -1888,7 +1888,7 @@ local function CreateConditionsUI()
   condFrame.cond_aura_class_note:SetText("No class-specific option added for your class.")
   condFrame.cond_aura_class_note:Hide()
 
-  local sepAuraBuff = SetSeparator("aura", 13, "EXTRA: VISIBILITY CONDITIONS", true, true)
+  local sepAuraBuff = SetSeparator("aura", 13, "EXTRA: VISIBILITY (SHOW/HIDE) CONDITIONS", true, true)
   if sepAuraBuff and srows then
     local newY = (srows[13] or 0) - 10
     sepAuraBuff:ClearAllPoints()
@@ -1905,7 +1905,7 @@ local function CreateConditionsUI()
 
   -- Aura: dynamic Visual Effects Conditions section
   local auraVfxBaseY = row14_y - 10
-  SetSeparator("aura", 14, "EXTRA: VISUAL EFFECTS CONDITIONS", true, true)
+  SetSeparator("aura", 14, "EXTRA: VISUAL EFFECT (GLOW/GREY) CONDITIONS", true, true)
   condFrame.auraVfxAnchor = CreateFrame("Frame", nil, _Parent())
   condFrame.auraVfxAnchor:SetPoint("TOPLEFT", _Parent(), "TOPLEFT", 0, auraVfxBaseY)
   condFrame.auraVfxAnchor:SetPoint("TOPRIGHT", _Parent(), "TOPRIGHT", 0, auraVfxBaseY)
@@ -1976,7 +1976,7 @@ local function CreateConditionsUI()
   -- USABILITY & COOLDOWN (no "Usable")
   condFrame.cond_item_notcd = MakeCheck("DoiteCond_Item_NotCD", "No cooldown", 0, row3_y)
   condFrame.cond_item_oncd = MakeCheck("DoiteCond_Item_OnCD", "On cooldown", 100, row3_y)
-  -- New Clickable option
+  -- Clickable option
   condFrame.cond_item_clickable = MakeCheck("DoiteCond_Item_Clickable", "Use item", 200, row3_y)
   
   SetSeparator("item", 3, "USABILITY & COOLDOWN", true, true)
@@ -2108,7 +2108,7 @@ local function CreateConditionsUI()
 
   -- Item: dynamic Aura Conditions section
   local itemAuraBaseY = row14_y
-  SetSeparator("item", 14, "EXTRA: VISIBILITY CONDITIONS", true, true)
+  SetSeparator("item", 14, "EXTRA: VISIBILITY (SHOW/HIDE) CONDITIONS", true, true)
   condFrame.itemAuraAnchor = CreateFrame("Frame", nil, _Parent())
   condFrame.itemAuraAnchor:SetPoint("TOPLEFT", _Parent(), "TOPLEFT", 0, itemAuraBaseY)
   condFrame.itemAuraAnchor:SetPoint("TOPRIGHT", _Parent(), "TOPRIGHT", 0, itemAuraBaseY)
@@ -2116,7 +2116,7 @@ local function CreateConditionsUI()
 
   -- Item: dynamic Visual Effects Conditions section
   local itemVfxBaseY = row15_y
-  SetSeparator("item", 15, "EXTRA: VISUAL EFFECTS CONDITIONS", true, true)
+  SetSeparator("item", 15, "EXTRA: VISUAL EFFECT (GLOW/GREY) CONDITIONS", true, true)
   condFrame.itemVfxAnchor = CreateFrame("Frame", nil, _Parent())
   condFrame.itemVfxAnchor:SetPoint("TOPLEFT", _Parent(), "TOPLEFT", 0, itemVfxBaseY)
   condFrame.itemVfxAnchor:SetPoint("TOPRIGHT", _Parent(), "TOPRIGHT", 0, itemVfxBaseY)
@@ -4155,7 +4155,7 @@ function UpdateItemStacksForMissing()
             UIDropDownMenu_SetSelectedValue(dd, val)
           end
           if UIDropDownMenu_SetText then
-            -- Twow signature: UIDropDownMenu_SetText(text, dropdownFrame)
+            -- UIDropDownMenu_SetText(text, dropdownFrame)
             UIDropDownMenu_SetText(val, dd)
           end
           _GoldifyDD(dd)
@@ -5237,7 +5237,7 @@ local function _ReflowCondAreaHeight()
 
   -- 1. Reflow Ability Section
   -- Base Y for Ability Visibility is row12_y (-470)
-  -- The layout uses fixed rows normally, so we check if the visibility anchor has grown.
+  -- The layout uses fixed rows normally, check if the visibility anchor has grown.
   if condFrame.abilityAuraAnchor and condFrame.abilityAuraAnchor:IsShown() then
     local visHeight = condFrame.abilityAuraAnchor:GetHeight() or 20
     -- The extra vertical space needed beyond the default 20px
@@ -5245,7 +5245,7 @@ local function _ReflowCondAreaHeight()
     
     -- Original Y for Ability Visibility is around -470 (row12_y)
     -- Original Y for Ability VFX is around -510 (row13_y) gap is ~40px.
-    -- If visHeight > 20, we need to push VFX down by (visHeight - 20).
+    -- If visHeight > 20, need to push VFX down by (visHeight - 20).
     
     local ROW12_Y = -470
     local ROW13_Y = -510
@@ -6310,7 +6310,7 @@ do
       label:SetPoint("TOPLEFT", anchorFrame, "TOPLEFT", 0, 0)
       label:SetJustifyH("LEFT")
       label:SetTextColor(1, 0.82, 0)
-      label:SetText("Add visibility conditions:")
+      label:SetText("Add extra visibility conditions to show/hide:")
       mgr.label = label
     end
 
@@ -6387,7 +6387,7 @@ end
 ----------------------------------------------------------------
 do
   -- VfxCond shares the AuraCond row state machine and UI, but uses different managers and data storage.
-  -- We reuse AuraCond_SetRowState, AuraCond_BuildDescription, etc. by referencing them.
+  -- Reuse AuraCond_SetRowState, AuraCond_BuildDescription, etc. by referencing them.
 
   local function VfxCond_GetListForType(typeKey)
     if not currentKey then
@@ -6418,15 +6418,35 @@ do
   end
 
   local function VfxCond_TitleCase(str)
-    if not str then return "" end
+    if not str then
+      return ""
+    end
+
+    -- Prefer AuraCond_TitleCase to keep behaviour identical across condition systems
+    if AuraCond_TitleCase then
+      return AuraCond_TitleCase(str)
+    end
+
+    -- Fallback (shouldn't be hit in this file, but safe)
+    str = tostring(str)
     return string.sub(string.gsub(" " .. str, "%W%l", string.upper), 2)
   end
 
   local function VfxCond_BuildDescription(buffType, mode, unit, name)
     local tStr = (buffType or "?")
     local mStr = (mode or "found")
-    local uStr = (unit and unit ~= "") and (" (on " .. unit .. ")") or ""
-    local nStr = (name or "?")
+
+    -- Normalize/pretty-print the name the same way AuraCond does
+    local nStr = (name ~= nil and name ~= "") and VfxCond_TitleCase(name) or "?"
+
+    -- Only append "(on ...)" when it actually adds information. If it's on player, omit the suffix entirely.
+    local uStr = ""
+    if unit and unit ~= "" then
+      local uLower = string.lower(tostring(unit))
+      if uLower ~= "player" then
+        uStr = " (on " .. unit .. ")"
+      end
+    end
 
     local text = ""
     if mStr == "missing" then
@@ -6562,7 +6582,7 @@ do
         row.labelFS:SetPoint("TOPLEFT", row, "TOPLEFT", 0, 0)
         row.labelFS:SetWidth(parentWidth - 30) -- Full width (minus delete button)
 
-        -- New row below text for checkboxes
+        -- row below text for checkboxes
         row.glowCB:ClearAllPoints()
         row.greyCB:ClearAllPoints()
         row.glowCB:SetPoint("TOPLEFT", row, "TOPLEFT", 0, -14)
@@ -6721,8 +6741,6 @@ do
 
     local n = VfxCond_Len(list)
     list[n + 1] = entry
-    DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00VfxCond_OnAdd: Saved! n="..(n+1).." name="..entry.name.."|r")
-
     VfxCond_RebuildFromDB_Internal(mgr.typeKey)
   end
 
@@ -6807,7 +6825,7 @@ do
     row.labelFS:SetTextColor(1, 1, 1)
     row.labelFS:SetNonSpaceWrap(false)
 
-    -- New Glow/Grey checkboxes for the SAVED state
+    -- Glow/Grey checkboxes for the SAVED state
     local function CreateMiniCheck(label)
       local cb = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
       cb:SetWidth(18); cb:SetHeight(18)
@@ -6940,7 +6958,7 @@ do
       label:SetPoint("TOPLEFT", anchorFrame, "TOPLEFT", 0, -15)
       label:SetJustifyH("LEFT")
       label:SetTextColor(1, 0.82, 0)
-      label:SetText("Add visual effect conditions:")
+      label:SetText("Add visual effect conditions for glow/grey:")
       mgr.label = label
     end
 
@@ -7870,7 +7888,7 @@ local ic = c.item or {}
 
       -- preserve outer isMissing flag for rest of Item logic
       -- Only consider "missing" effectively if it is the ONLY selection.
-      -- If Equipped or Bag is also checked, we allow configuring other properties (stacks, cooldowns, etc.)
+      -- If Equipped or Bag is also checked, allow configuring other properties (stacks, cooldowns, etc.)
       isMissing = (ms and (not eq) and (not bg))
     end
 

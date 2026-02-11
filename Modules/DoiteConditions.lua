@@ -4987,7 +4987,10 @@ local function CheckAbilityConditions(data)
   local glow = (c.glow or vGlow) and true or false
   local grey = (c.greyscale or vGrey) and true or false
 
-  if glow or grey then show = true end
+  if not show then
+    glow = false
+    grey = false
+  end
 
   return show, glow, grey
 end
@@ -5305,7 +5308,12 @@ local function CheckItemConditions(data)
   local vGlow, vGrey = _EvaluateVfxConditions(data)
   local glow = (c.glow or vGlow) and true or false
   local grey = (c.greyscale or vGrey) and true or false
-  if glow or grey then show = true end
+
+  if not show then
+    glow = false
+    grey = false
+  end
+
   return show, glow, grey
 end
 
@@ -5740,7 +5748,12 @@ local function CheckAuraConditions(data)
   local vGlow, vGrey = _EvaluateVfxConditions(data)
   local glow = (c.glow or vGlow) and true or false
   local grey = (c.greyscale or vGrey) and true or false
-  if glow or grey then show = true end
+
+  if not show then
+    glow = false
+    grey = false
+  end
+
   return show, glow, grey
 end
 

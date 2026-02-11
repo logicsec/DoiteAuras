@@ -1910,7 +1910,7 @@ local function FindPlayerDebuff(name)
     return false,nil
 end
 
--- Helper: Use item by name scanning bags/inventory (1.12 compat)
+-- Helper: Use item by name scanning bags/inventory
 local function DA_UseItemByName(itemName)
     if not itemName or itemName == "" then return end
     
@@ -2124,8 +2124,8 @@ local function EnsureDefaults(key)
     
     if d.type == "Item" then
         if not d.conditions.item then d.conditions.item = {} end
-        -- Note: We don't force 'clickable' to true here, we respect the saved value (or nil).
-        -- We just ensure the TABLE exists so checks like 'd.conditions.item.clickable' don't crash or fail logic.
+        -- Note: Don't force 'clickable' to true here, respect the saved value (or nil).
+        -- Just ensure the TABLE exists so checks like 'd.conditions.item.clickable' don't crash or fail logic.
     elseif d.type == "Ability" then
         if not d.conditions.ability then d.conditions.ability = {} end
     end
@@ -2534,7 +2534,6 @@ local function RefreshIcons()
                              and (not blockedByGroup)
                              and (not blockedByBucket)
 
-        -- Fix: Clickable Item Logic (1.12 Script)
         -- MOVED OUTSIDE of visibility check to ensure handlers are attached even if the icon is initially hidden (e.g. startup race).
         -- Visibility is dynamic (DoiteConditions), but the handler must be ready when it shows.
         
@@ -2556,7 +2555,7 @@ local function RefreshIcons()
              end)
         elseif data and data.type == "Item" then
              -- If not clickable (or editing), ensure mouse is disabled (unless editing logic enabled it)
-             -- We check type=="Item" to avoid messing with abilities/auras which might have their own logic (though they usually don't click).
+             -- Check type=="Item" to avoid messing with abilities/auras which might have their own logic (though they usually don't click).
              if not _G["DoiteEdit_CurrentKey"] then
                  f:EnableMouse(false)
                  f:SetScript("OnClick", nil)
