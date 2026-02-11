@@ -810,7 +810,7 @@ local function InitFormDropdown(dd, data, condType)
       local info = UIDropDownMenu_CreateInfo()
       info.text = form
       info.value = form
-      local pickedForm = form -- capture
+      local pickedForm = form
 
       info.func = function(button)
         local picked = (button and button.value) or pickedForm
@@ -5222,8 +5222,7 @@ function UpdateItemStacksForMissing()
   end
 end
 
--- Dynamically resize the scroll/content area to fit the last visible row (+20px buffer)
--- Dynamically resize the scroll/content area AND reposition VFX sections
+-- Dynamically resize the scroll/content area to fit the last visible row (+20px buffer) + Dynamically resize the scroll/content area AND reposition VFX sections
 local function _ReflowCondAreaHeight()
   if not condFrame then
     return
@@ -5583,14 +5582,14 @@ do
 
       local modeWord
       if mode == "oncd" then
-        modeWord = "On cooldown"
+        modeWord = "On CD"
       else
-        modeWord = "Not on cooldown"
+        modeWord = "Not on CD"
       end
       local modePart = yellow .. modeWord .. "|r"
       local namePart = white .. (niceName or "") .. "|r"
 
-      -- Example: [blue]Ability|r | [yellow]Not on cooldown|r: [white]Sinister Strike|r
+      -- Example: [blue]Ability|r | [yellow]Not on CD|r: [white]Sinister Strike|r
       return typePart .. " " .. sep .. modePart .. ": " .. namePart
 
     elseif buffType == "TALENT" then
@@ -6394,21 +6393,34 @@ do
       DEFAULT_CHAT_FRAME:AddMessage("|cffff0000GetList: No currentKey|r")
       return nil
     end
-    -- Use EnsureDBEntry like AuraCond does to access main DB
+  
     local d = EnsureDBEntry(currentKey)
     if not d then
       DEFAULT_CHAT_FRAME:AddMessage("|cffff0000GetList: EnsureDBEntry failed for '"..tostring(currentKey).."'|r")
       return nil
     end
-
+  
     if not d.conditions then d.conditions = {} end
-    if not d.conditions.vfxConds then d.conditions.vfxConds = {} end
-
-    if not d.conditions.vfxConds[typeKey] then
-      d.conditions.vfxConds[typeKey] = {}
+  
+    if typeKey == "ability" then
+      d.conditions.ability = d.conditions.ability or {}
+      d.conditions.ability.vfxConditions = d.conditions.ability.vfxConditions or {}
+      return d.conditions.ability.vfxConditions
+  
+    elseif typeKey == "aura" then
+      d.conditions.aura = d.conditions.aura or {}
+      d.conditions.aura.vfxConditions = d.conditions.aura.vfxConditions or {}
+      return d.conditions.aura.vfxConditions
+  
+    elseif typeKey == "item" then
+      d.conditions.item = d.conditions.item or {}
+      d.conditions.item.vfxConditions = d.conditions.item.vfxConditions or {}
+      return d.conditions.item.vfxConditions
     end
-    return d.conditions.vfxConds[typeKey]
+  
+    return nil
   end
+
 
   local function VfxCond_Len(t)
     if not t then return 0 end
@@ -6433,32 +6445,235 @@ do
   end
 
   local function VfxCond_BuildDescription(buffType, mode, unit, name)
-    local tStr = (buffType or "?")
-    local mStr = (mode or "found")
-
-    -- Normalize/pretty-print the name the same way AuraCond does
-    local nStr = (name ~= nil and name ~= "") and VfxCond_TitleCase(name) or "?"
-
-    -- Only append "(on ...)" when it actually adds information. If it's on player, omit the suffix entirely.
-    local uStr = ""
-    if unit and unit ~= "" then
-      local uLower = string.lower(tostring(unit))
-      if uLower ~= "player" then
-        uStr = " (on " .. unit .. ")"
+    local niceName = VfxCond_TitleCase(name or "")
+  
+    local yellow = "|cffffd000"
+    local white  = "|cffffffff"
+    local sep    = "|cffffffff | |r"  -- white " | "
+  
+    -- Normalize inputs (VFX might store these in different casing)
+    local bt = string.upper(tostring(buffType or ""))
+    local m  = string.lower(tostring(mode or ""))
+    local u  = string.lower(tostring(unit or ""))
+  
+    -- Special case: Ability rows
+    if bt == "ABILITY" then
+      local typeColor = "|cff4da6ff" -- ability blue
+      local typePart  = typeColor .. "Ability" .. "|r"
+  
+      local modeWord
+      if m == "oncd" then
+        modeWord = "On CD"
+      else
+        modeWord = "Not on CD"
       end
+  
+      local modePart = yellow .. modeWord .. "|r"
+      local namePart = white .. (niceName or "") .. "|r"
+  
+      -- [blue]Ability|r | [yellow]Not on CD|r: [white]Sinister Strike|r
+      return typePart .. " " .. sep .. modePart .. ": " .. namePart
+  
+    elseif bt == "TALENT" then
+      -- Talent rows: mode stored as "Known" or "Not known"
+      local isKnown = (m == "known")
+      local stateWord = isKnown and "Known" or "Not known"
+      local stateColor = isKnown and "|cff00ff00" or "|cffff0000"
+      local statePart = stateColor .. stateWord .. "|r"
+  
+      local talentPart = yellow .. "Talent" .. "|r"
+      local namePart   = white .. (niceName or "") .. "|r"
+  
+      -- Talent (yellow) | Known/Not known (green/red): Name (white)
+      return talentPart .. " " .. sep .. statePart .. ": " .. namePart
     end
-
-    local text = ""
-    if mStr == "missing" then
-      text = "Missing " .. tStr .. ": " .. nStr .. uStr
+  
+    -- Default: Buff / Debuff aura rows
+    local isDebuff = (bt == "DEBUFF")
+    local typeWord = isDebuff and "Debuff" or "Buff"
+    local modeWord = (m == "missing") and "Missing" or "Found"
+  
+    local unitWord
+    if u == "target" then
+      unitWord = "On target"
     else
-      -- "found" or default
-      text = tStr .. ": " .. nStr .. uStr
+      unitWord = "On player"
     end
-    return "|cffffffff" .. text .. "|r"
+  
+    local typeColor = isDebuff and "|cffff0000" or "|cff00ff00"
+  
+    local typePart = typeColor .. typeWord .. "|r"
+    local modePart = yellow .. modeWord .. "|r"
+    local unitPart = yellow .. unitWord .. "|r"
+    local namePart = white .. (niceName or "") .. "|r"
+  
+    -- [green/red]Buff|r [white]| |r [yellow]Found|r [white]| |r [yellow]On player|r: [white]Battle Shout|r
+    return typePart .. " " .. sep .. modePart .. " " .. sep .. unitPart .. ": " .. namePart
   end
 
+
   local VfxCond_RowCounter = 0
+
+  -- Small helper to reopen the dropdown a frame later
+  local _vfxDDReopenFrame = CreateFrame("Frame", "DoiteEditVfxReopenFrame")
+  local _vfxDDReopenRow = nil
+  
+  _vfxDDReopenFrame:Hide()
+  _vfxDDReopenFrame:SetScript("OnUpdate", function()
+    _vfxDDReopenFrame:Hide()
+    if not _vfxDDReopenRow or not _vfxDDReopenRow.abilityDD then
+      _vfxDDReopenRow = nil
+      return
+    end
+    ToggleDropDownMenu(nil, nil, _vfxDDReopenRow.abilityDD, _vfxDDReopenRow.abilityDD, 0, 0)
+    _vfxDDReopenRow = nil
+  end)
+  
+  local function VfxCond_ReopenDDNextFrame(row)
+    _vfxDDReopenRow = row
+    _vfxDDReopenFrame:Show()
+  end
+  
+  -- Make VfxCond length behave EXACTLY like AuraCond (array-style)
+  local function VfxCond_Len(t)
+    if not t then return 0 end
+    local n = 0
+    while t[n + 1] ~= nil do
+      n = n + 1
+    end
+    return n
+  end
+  
+  -- Build a sorted list of non-passive abilities from the spellbook (same logic as AuraCond)
+  local function VfxCond_BuildAbilitySpellList()
+    local spells = {}
+    local seen = {}
+    local i = 1
+  
+    while true do
+      local name, rank = GetSpellName(i, BOOKTYPE_SPELL)
+      if not name then break end
+  
+      local isPassive = false
+      if IsPassiveSpell then
+        local ok, passive = pcall(IsPassiveSpell, i, BOOKTYPE_SPELL)
+        if ok and passive then
+          isPassive = true
+        end
+      end
+      if (not isPassive) and rank and string.find(rank, "Passive") then
+        isPassive = true
+      end
+  
+      if not isPassive and name and name ~= "" and not seen[name] then
+        table.insert(spells, name)
+        seen[name] = true
+      end
+  
+      i = i + 1
+    end
+  
+    table.sort(spells, function(a, b)
+      a = string.lower(a or "")
+      b = string.lower(b or "")
+      return a < b
+    end)
+  
+    return spells
+  end
+
+  -- Initialize / refresh the Ability dropdown for a given VFX editing row
+  local function VfxCond_InitAbilityDropdown(row)
+    if not row or not row.abilityDD then return end
+  
+    local spells = VfxCond_BuildAbilitySpellList()
+    row._abilitySpells = spells
+  
+    local total = table.getn(spells)
+    local perPage = 10
+  
+    if total == 0 then
+      UIDropDownMenu_Initialize(row.abilityDD, function() end)
+      if UIDropDownMenu_SetText then
+        pcall(UIDropDownMenu_SetText, "No abilities found", row.abilityDD)
+      end
+      return
+    end
+  
+    local maxPage = math.max(1, math.ceil(total / perPage))
+    local page = row._abilityPage or 1
+    if page < 1 then page = 1 end
+    if page > maxPage then page = maxPage end
+    row._abilityPage = page
+  
+    local startIndex = (page - 1) * perPage + 1
+    local endIndex = math.min(startIndex + perPage - 1, total)
+  
+    UIDropDownMenu_Initialize(row.abilityDD, function(frame, level, menuList)
+      local info
+  
+      if page > 1 then
+        info = {}
+        info.text = "|cffffd000<< Previous|r"
+        info.value = "PREV"
+        info.notCheckable = true
+        info.func = function()
+          row._abilityPage = page - 1
+          VfxCond_InitAbilityDropdown(row)
+          VfxCond_ReopenDDNextFrame(row)
+        end
+        UIDropDownMenu_AddButton(info)
+      end
+  
+      local idx = startIndex
+      while idx <= endIndex do
+        local name = spells[idx]
+        info = {}
+        info.text = name
+        info.value = name
+        local pickedName = name
+        info.func = function(button)
+          local val = (button and button.value) or pickedName
+          row._spellName = val
+  
+          if UIDropDownMenu_SetSelectedValue then
+            pcall(UIDropDownMenu_SetSelectedValue, row.abilityDD, val)
+         end
+          if UIDropDownMenu_SetText then
+            pcall(UIDropDownMenu_SetText, val, row.abilityDD)
+         end
+          if _GoldifyDD then
+            _GoldifyDD(row.abilityDD)
+          end
+        end
+        info.checked = (row._spellName == name)
+        UIDropDownMenu_AddButton(info)
+        idx = idx + 1
+      end
+  
+      if page < maxPage then
+        info = {}
+        info.text = "|cffffd000Next >>|r"
+        info.value = "NEXT"
+        info.notCheckable = true
+        info.func = function()
+          row._abilityPage = page + 1
+          VfxCond_InitAbilityDropdown(row)
+          VfxCond_ReopenDDNextFrame(row)
+        end
+        UIDropDownMenu_AddButton(info)
+      end
+    end)
+  
+    local label = row._spellName or "Select ability"
+    if UIDropDownMenu_SetText then
+      pcall(UIDropDownMenu_SetText, label, row.abilityDD)
+    end
+    if _GoldifyDD then
+      _GoldifyDD(row.abilityDD)
+    end
+  end
+
 
   local function VfxCond_SetRowState(row, state)
     row._state = state
@@ -6554,24 +6769,44 @@ do
       row.btn1:Show()
       row.btn2:Show()
 
-    elseif state == "INPUT" then
-      local addWidth = row.addButton:GetWidth() or 40
-      local rightGap = 2
-      local totalRight = closeWidth + spacing + addWidth + rightGap
+	elseif state == "INPUT" then
+	  local addWidth = row.addButton:GetWidth() or 40
+	  local rightGap = 2
+	  local totalRight = closeWidth + spacing + addWidth + rightGap
 
-      local editWidth = parentWidth - spacing - totalRight
-      if editWidth < 60 then editWidth = 60 end
+	  local editWidth = parentWidth - spacing - totalRight
+	  if editWidth < 60 then editWidth = 60 end
 
-      row.editBox:ClearAllPoints()
-      row.addButton:ClearAllPoints()
+	  row.editBox:ClearAllPoints()
+	  row.addButton:ClearAllPoints()
+	  if row.abilityDD then
+		row.abilityDD:ClearAllPoints()
+	  end
 
-      row.editBox:SetWidth(editWidth)
-      row.editBox:SetPoint("LEFT", row, "LEFT", 10, 0)
-      row.addButton:SetPoint("RIGHT", row.closeBtn, "LEFT", -rightGap, 0)
-      row.addButton:SetText("Add")
+	  row.editBox:SetWidth(editWidth)
+	  row.editBox:SetPoint("LEFT", row, "LEFT", 10, 0)
 
-      row.editBox:Show()
-      row.addButton:Show()
+	  row.addButton:SetPoint("RIGHT", row.closeBtn, "LEFT", -rightGap, 0)
+	  row.addButton:SetText("Add")
+
+	  if row._branch == "ABILITY" then
+		-- Ability branch: dropdown like AuraCond
+		if row.abilityDD then
+		  row.editBox:Hide()
+		  row.abilityDD:SetPoint("LEFT", row, "LEFT", -15, -4)
+		  if UIDropDownMenu_SetWidth then
+			pcall(UIDropDownMenu_SetWidth, editWidth, row.abilityDD)
+		  end
+		  VfxCond_InitAbilityDropdown(row)
+		  row.abilityDD:Show()
+		end
+		row.addButton:Show()
+	  else
+		-- Buff/Debuff/Talent: free text
+		if row.abilityDD then row.abilityDD:Hide() end
+		row.editBox:Show()
+		row.addButton:Show()
+	  end
 
     elseif state == "SAVED" then
       row.labelFS:SetText(row._desc or "")
@@ -6600,13 +6835,24 @@ do
     row._choiceMode = nil
     row._choiceUnit = nil
     row._spellName = nil
-
+    row._abilityPage = 1
+  
     if row.editBox and row.editBox.SetText then
       row.editBox:SetText("")
     end
-
+  
+    if row.abilityDD then
+      if UIDropDownMenu_ClearAll then
+        pcall(UIDropDownMenu_ClearAll, row.abilityDD)
+      end
+      if UIDropDownMenu_SetText then
+        pcall(UIDropDownMenu_SetText, "Select ability", row.abilityDD)
+      end
+    end
+  
     VfxCond_SetRowState(row, "STEP1")
   end
+
 
   local function VfxCond_RebuildFromDB_Internal(typeKey)
     local mgr = VfxCond_Managers[typeKey]
@@ -6709,9 +6955,14 @@ do
     local mgr = row._manager
     if not mgr then return end
 
-    local text = row.editBox and row.editBox:GetText() or ""
-    text = string.gsub(text or "", "^%s*(.-)%s*$", "%1")
-    if text == "" then return end
+	local text
+	if row._branch == "ABILITY" then
+	  text = row._spellName or ""
+	else
+	  text = row.editBox and row.editBox:GetText() or ""
+	end
+	text = string.gsub(text or "", "^%s*(.-)%s*$", "%1")
+	if text == "" then return end
 
     local buffType = row._choiceBuffType or "BUFF"
     local mode = row._choiceMode or "found"
@@ -6792,6 +7043,10 @@ do
     row.addButton = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
     row.labelFS = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     row.labelFS:SetJustifyH("LEFT")
+	
+	local ddName = "DoiteVfxCond_AbilityDD_" .. tostring(mgr.typeKey or "X") .. "_" .. tostring(VfxCond_RowCounter)
+	row.abilityDD = CreateFrame("Frame", ddName, row, "UIDropDownMenuTemplate")
+	row._abilityPage = 1
 
     row.btn1:SetWidth(mainWidth)
     row.btn2:SetWidth(mainWidth)
@@ -6820,6 +7075,12 @@ do
 
     row.editBox:SetPoint("LEFT", row, "LEFT", 0, 0)
     row.addButton:SetPoint("LEFT", row.editBox, "RIGHT", spacing, 0)
+	
+	-- Ability dropdown sits where the editBox does (INPUT state swaps between them)
+	row.abilityDD:SetPoint("LEFT", row, "LEFT", 0, -2)
+	if UIDropDownMenu_SetWidth then
+	  pcall(UIDropDownMenu_SetWidth, parentWidth - closeWidth - spacing * 3 - 40, row.abilityDD)
+	end
 
     row.labelFS:SetPoint("LEFT", row, "LEFT", 0, 0)
     row.labelFS:SetTextColor(1, 1, 1)

@@ -4578,16 +4578,17 @@ end
 local _DA_SWIFTMEND_NEEDS = { "Rejuvenation", "Regrowth" }
 
 local function _EvaluateVfxConditions(data)
-  if not data or not data.conditions or not data.conditions.vfxConds then
+  if not data or not data.conditions then
     return false, false
   end
-  local vfx = data.conditions.vfxConds
+
   local glowOut, greyOut = false, false
 
   local types = { "ability", "aura", "item" }
   local tIdx, typeKey
   for tIdx, typeKey in ipairs(types) do
-    local list = vfx[typeKey]
+    local bucket = data.conditions[typeKey]
+    local list = bucket and bucket.vfxConditions
     if list and table.getn(list) > 0 then
       local i, entry
       for i, entry in ipairs(list) do
