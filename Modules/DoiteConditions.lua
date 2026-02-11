@@ -982,6 +982,8 @@ local INV_SLOT_MAINHAND = 16
 local INV_SLOT_OFFHAND = 17
 local INV_SLOT_RANGED = 18
 
+local DOITE_ITEM_CD_IGNORE = 5.0
+
 local function _SlotIndexForName(name)
   if name == "TRINKET1" then
     return INV_SLOT_TRINKET1
@@ -1205,7 +1207,8 @@ local function _GetInventorySlotState(slot)
 
   local start, dur, enable = GetInventoryItemCooldown("player", slot)
   local rem, onCd = 0, false
-  if start and dur and start > 0 and dur > 1.5 then
+  if start and dur and start > 0 and dur > DOITE_ITEM_CD_IGNORE then
+
     rem = (start + dur) - GetTime()
     if rem < 0 then
       rem = 0
@@ -1747,7 +1750,8 @@ local function _EvaluateItemCoreState(data, c)
       local link = GetInventoryItemLink("player", loc)
       hasItem = (link ~= nil)
       local start, dur0, enable = GetInventoryItemCooldown("player", loc)
-      if start and dur0 and start > 0 and dur0 > 1.5 then
+      if start and dur0 and start > 0 and dur0 > DOITE_ITEM_CD_IGNORE then
+
         rem = (start + dur0) - GetTime()
         if rem < 0 then
           rem = 0
@@ -1763,7 +1767,8 @@ local function _EvaluateItemCoreState(data, c)
       local link = GetContainerItemLink(loc.bag, loc.slot)
       hasItem = (link ~= nil)
       local start, dur0, enable = GetContainerItemCooldown(loc.bag, loc.slot)
-      if start and dur0 and start > 0 and dur0 > 1.5 then
+      if start and dur0 and start > 0 and dur0 > DOITE_ITEM_CD_IGNORE then
+
         rem = (start + dur0) - GetTime()
         if rem < 0 then
           rem = 0
