@@ -6408,7 +6408,10 @@ function DoiteConditions:ApplyVisuals(key, show, glow, grey)
     frame._daSliding = slideActive and true or false
     frame._daShouldShow = ((show == true) or editing) and true or false
     frame._daUseGlow = useGlow and true or false
+    frame._daUseGlow = useGlow and true or false
     frame._daUseGreyscale = useGrey and true or false
+    -- Sync with DoiteAuras.lua expectation
+    frame._daGreyscale = frame._daUseGreyscale
   end
 
   -- Determine baseline anchoring
@@ -6517,7 +6520,7 @@ function DoiteConditions:ApplyVisuals(key, show, glow, grey)
 
     -- GREYSCALE — only flip when it changes
     if frame.icon then
-      local wantGrey = (frame._daUseGreyscale == true) and showForSlide
+      local wantGrey = (frame._daGreyscale == true) and showForSlide
       if frame._daLastGrey ~= wantGrey then
         frame._daLastGrey = wantGrey
         if wantGrey then
@@ -6525,6 +6528,10 @@ function DoiteConditions:ApplyVisuals(key, show, glow, grey)
         else
           frame.icon:SetDesaturated(nil)
         end
+        
+        -- Fix: Update clickability for Items when grey state changes
+        -- REMOVED: DoiteAuras.lua handles all clickability/mouse-enable logic centrally now.
+        -- We no longer disable mouse just because an item is grey/cooldown.
       end
     end
 
