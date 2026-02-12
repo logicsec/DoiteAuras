@@ -1003,6 +1003,12 @@ local function SetExclusiveItemMode(mode)
   d.conditions.item = d.conditions.item or {}
   local ic = d.conditions.item
 
+  -- Migrate legacy mode to booleans if they don't exist yet
+  if ic.mode then
+    if ic.mode == "notcd" then ic.notcd = true end
+    if ic.mode == "oncd" then ic.oncd = true end
+  end
+
   if mode == "notcd" then
     ic.notcd = true
     ic.mode = nil
