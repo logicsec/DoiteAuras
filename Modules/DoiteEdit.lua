@@ -5233,18 +5233,8 @@ local function _ReflowCondAreaHeight()
     return
   end
 
-
-  -- 1. Reflow Ability Section
-  -- Base Y for Ability Visibility is row12_y (-470)
-  -- The layout uses fixed rows normally, check if the visibility anchor has grown.
   if condFrame.abilityAuraAnchor and condFrame.abilityAuraAnchor:IsShown() then
     local visHeight = condFrame.abilityAuraAnchor:GetHeight() or 20
-    -- The extra vertical space needed beyond the default 20px
-    -- (If height is 20, expansion is 0. If height is 100, expansion is 80)
-    
-    -- Original Y for Ability Visibility is around -470 (row12_y)
-    -- Original Y for Ability VFX is around -510 (row13_y) gap is ~40px.
-    -- If visHeight > 20, need to push VFX down by (visHeight - 20).
     
     local ROW12_Y = -470
     local ROW13_Y = -510
@@ -5568,18 +5558,18 @@ do
     end
   end
 
-  local function AuraCond_BuildDescription(buffType, mode, unit, name)
+  local function AuraCond_BuildDescription(buffType, mode, unit, name, stacksEnabled, stacksComp, stacksVal)
     local niceName = AuraCond_TitleCase(name or "")
-
+  
     local yellow = "|cffffd000"
-    local white = "|cffffffff"
-    local sep = "|cffffffff | |r"  -- white " | "
-
+    local white  = "|cffffffff"
+    local sep    = "|cffffffff | |r"  -- white " | "
+  
     -- Special case: Ability rows
     if buffType == "ABILITY" then
       local typeColor = "|cff4da6ff" -- ability blue
       local typePart = typeColor .. "Ability" .. "|r"
-
+  
       local modeWord
       if mode == "oncd" then
         modeWord = "On CD"
@@ -5588,15 +5578,13 @@ do
       end
       local modePart = yellow .. modeWord .. "|r"
       local namePart = white .. (niceName or "") .. "|r"
-
-      -- Example: [blue]Ability|r | [yellow]Not on CD|r: [white]Sinister Strike|r
+  
       return typePart .. " " .. sep .. modePart .. ": " .. namePart
-
+  
     elseif buffType == "TALENT" then
-      -- Talent rows: mode stored as "Known" or "Not known"
       local modeStr = mode or ""
       local lower = string.lower(modeStr)
-
+  
       local isKnown = (lower == "known")
       local stateWord
       if isKnown then
@@ -5604,204 +5592,247 @@ do
       else
         stateWord = "Not known"
       end
-
+  
       local stateColor = isKnown and "|cff00ff00" or "|cffff0000"
       local statePart = stateColor .. stateWord .. "|r"
-
-      -- Talent (yellow)
+  
       local talentPart = yellow .. "Talent" .. "|r"
       local namePart = white .. (niceName or "") .. "|r"
-
-      --   Talent (yellow) | Known/Not known (green/red): Name (white)
+  
       return talentPart .. " " .. sep .. statePart .. ": " .. namePart
     end
-
+  
     -- Default: Buff / Debuff aura rows
     local typeWord = (buffType == "DEBUFF") and "Debuff" or "Buff"
     local modeWord = (mode == "missing") and "Missing" or "Found"
     local unitWord
     if unit == "target" then
-      unitWord = "On target"
+      unitWord = "Target"
     else
-      unitWord = "On player"
+      unitWord = "Player"
     end
-
-    -- colors:
-    --  Buff    -> green
-    --  Debuff  -> red
-    --  "Found"/"Missing" and "On player"/"On target" -> yellow
-    --  "|" separators and the aura name -> white
+  
     local typeColor = (buffType == "DEBUFF") and "|cffff0000" or "|cff00ff00"
-
+  
     local typePart = typeColor .. typeWord .. "|r"
     local modePart = yellow .. modeWord .. "|r"
     local unitPart = yellow .. unitWord .. "|r"
-    local namePart = white .. (niceName or "") .. "|r"
-
-    -- Example final string:
-    --   [green/red]Buff|r [white]| |r [yellow]Found|r [white]| |r [yellow]On player|r: [white]Battle Shout|r
+  
+    -- stacks prefix: ≥5xName, ≤3xName, =2xName
+    local prefix = ""
+    if stacksEnabled and stacksComp and stacksComp ~= "" and stacksVal and tostring(stacksVal) ~= "" then
+      local sym = stacksComp
+      if sym == ">=" then sym = "≥"
+      elseif sym == "<=" then sym = "≤"
+      elseif sym == "==" then sym = "="
+      end
+      prefix = tostring(sym) .. tostring(stacksVal) .. "x"
+    end
+  
+    local namePart = white .. prefix .. (niceName or "") .. "|r"
     return typePart .. " " .. sep .. modePart .. " " .. sep .. unitPart .. ": " .. namePart
+  end
+  
+  -- Only update stacks widget visibility + Continue enabled-state.
+  -- IMPORTANT: This does NOT rebuild the whole row, so the editbox keeps focus.
+  local function AuraCond_UpdateStacksUI(row)
+    if not row then return end
+
+    local enabled = row._stacksEnabled and true or false
+
+    if row.stacksCompDD then
+      if enabled then row.stacksCompDD:Show() else row.stacksCompDD:Hide() end
+    end
+    if row.stacksVal then
+      if enabled then row.stacksVal:Show() else row.stacksVal:Hide() end
+    end
+    if row.stacksValEnter then
+      if enabled then row.stacksValEnter:Show() else row.stacksValEnter:Hide() end
+    end
+
+    -- Continue enabled if: - stacks not enabled OR enabled AND comp selected AND val non-empty
+    local ok = true
+    if enabled then
+      local comp = row._stacksComp
+      local val  = row._stacksVal
+      comp = string.gsub(tostring(comp or ""), "^%s*(.-)%s*$", "%1")
+      val  = string.gsub(tostring(val  or ""), "^%s*(.-)%s*$", "%1")
+      if comp == "" or val == "" then
+        ok = false
+      end
+    end
+    if row.okBtn and row.okBtn.SetEnabled then
+      row.okBtn:SetEnabled(ok and 1 or 0)
+    end
   end
 
   local function AuraCond_SetRowState(row, state)
     row._state = state
-
+  
     -- hide everything by default
     row.btn1:Hide()
     row.btn2:Hide()
-    if row.btn3 then
-      row.btn3:Hide()
-    end
+    if row.btn3 then row.btn3:Hide() end
     row.closeBtn:Show()
+    row.okBtn:Hide()
     row.editBox:Hide()
     row.addButton:Hide()
     row.labelFS:Hide()
-    if row.abilityDD then
-      row.abilityDD:Hide()
-    end
-
+    if row.abilityDD then row.abilityDD:Hide() end
+  
+    if row.stacksLabel then row.stacksLabel:Hide() end
+    if row.stacksCB then row.stacksCB:Hide() end
+    if row.stacksCompDD then row.stacksCompDD:Hide() end
+    if row.stacksVal then row.stacksVal:Hide() end
+    if row.stacksValEnter then row.stacksValEnter:Hide() end
+  
     -- cached layout helpers
     local spacing = row._spacing or 4
     local parentWidth = row._parentWidth or 260
     local closeWidth = row._closeWidth or 20
-
+    local okWidth = row._okWidth or 20
+  
+    -- keep old name used below, but make it safe (no rebuild)
+    local function UpdateStacksVisibility()
+      AuraCond_UpdateStacksUI(row)
+    end
+  
     if state == "STEP1" then
-      -- First step: four choices (Ability / Buff / Debuff / Talent)
       row._branch = nil
-
-      -- Space available for four buttons (leave room for [X] and some padding)
+  
       local available = parentWidth - closeWidth - spacing * 5
-      if available < 80 then
-        available = 80
-      end
+      if available < 80 then available = 80 end
       local w = math.floor(available / 4)
-
+  
       row.btn1:SetWidth(w)
       row.btn2:SetWidth(w)
       row.addButton:SetWidth(w)
-      if row.btn3 then
-        row.btn3:SetWidth(w)
-      end
-
+      if row.btn3 then row.btn3:SetWidth(w) end
+    
       row.btn1:ClearAllPoints()
       row.btn2:ClearAllPoints()
       row.addButton:ClearAllPoints()
-      if row.btn3 then
-        row.btn3:ClearAllPoints()
-      end
-
+      if row.btn3 then row.btn3:ClearAllPoints() end
+  
       row.btn1:SetPoint("LEFT", row, "LEFT", 0, 0)
       row.btn2:SetPoint("LEFT", row.btn1, "RIGHT", spacing, 0)
       row.addButton:SetPoint("LEFT", row.btn2, "RIGHT", spacing, 0)
-      if row.btn3 then
-        row.btn3:SetPoint("LEFT", row.addButton, "RIGHT", spacing, 0)
-      end
-
+      if row.btn3 then row.btn3:SetPoint("LEFT", row.addButton, "RIGHT", spacing, 0) end
+  
       row.btn1:SetText("Ability")
       row.btn2:SetText("Buff")
       row.addButton:SetText("Debuff")
-      if row.btn3 then
-        row.btn3:SetText("Talent")
-      end
-
+      if row.btn3 then row.btn3:SetText("Talent") end
+  
       row.btn1:Show()
       row.btn2:Show()
       row.addButton:Show()
-      if row.btn3 then
-        row.btn3:Show()
-      end
-
+      if row.btn3 then row.btn3:Show() end
+  
     elseif state == "STEP2" then
-      -- Second step: two wide buttons (Not on CD / On CD, Found / Missing, Known / Not known)
-
-      -- Space for two buttons + [X]
       local available = parentWidth - closeWidth - spacing * 3
-      if available < 120 then
-        available = 120
-      end
+      if available < 120 then available = 120 end
       local w = math.floor(available / 2)
-
+  
       row.btn1:SetWidth(w)
       row.btn2:SetWidth(w)
-
+  
       row.btn1:ClearAllPoints()
       row.btn2:ClearAllPoints()
       row.btn1:SetPoint("LEFT", row, "LEFT", 0, 0)
       row.btn2:SetPoint("LEFT", row.btn1, "RIGHT", spacing, 0)
-
+  
       if row._branch == "ABILITY" then
-        -- Ability: cooldown mode
         row.btn1:SetText("Not on CD")
         row.btn2:SetText("On CD")
-
       elseif row._branch == "TALENT" then
-        -- Talent: Known / Not known
         row.btn1:SetText("Known")
         row.btn2:SetText("Not known")
-
       else
-        -- Aura (Buff/Debuff): Found / Missing
         row.btn1:SetText("Found")
         row.btn2:SetText("Missing")
       end
-
+  
       row.btn1:Show()
       row.btn2:Show()
-
+  
     elseif state == "STEP3" then
-      -- Aura only: unit selection (two wide buttons: On player / On target)
-
       local available = parentWidth - closeWidth - spacing * 3
-      if available < 120 then
-        available = 120
-      end
+      if available < 120 then available = 120 end
       local w = math.floor(available / 2)
-
+  
       row.btn1:SetWidth(w)
       row.btn2:SetWidth(w)
-
+  
       row.btn1:ClearAllPoints()
       row.btn2:ClearAllPoints()
       row.btn1:SetPoint("LEFT", row, "LEFT", 0, 0)
       row.btn2:SetPoint("LEFT", row.btn1, "RIGHT", spacing, 0)
-
+  
       row.btn1:SetText("On player")
       row.btn2:SetText("On target")
       row.btn1:Show()
       row.btn2:Show()
-
+  
+    elseif state == "STACKS" then
+      -- Layout: Stacks? [ ] [DD] [Edit] (#) [✓] [X]
+      row.okBtn:Show()
+  
+      -- Right side buttons
+      row.closeBtn:ClearAllPoints()
+      row.okBtn:ClearAllPoints()
+      row.closeBtn:SetPoint("RIGHT", row, "RIGHT", 0, 0)
+      row.okBtn:SetPoint("RIGHT", row.closeBtn, "LEFT", -spacing, 0)
+  
+      -- Left side stacks widgets
+      if row.stacksLabel then
+        row.stacksLabel:ClearAllPoints()
+        row.stacksLabel:SetPoint("LEFT", row, "LEFT", 0, 0)
+        row.stacksLabel:Show()
+      end
+      if row.stacksCB then
+        row.stacksCB:ClearAllPoints()
+        row.stacksCB:SetPoint("LEFT", row, "LEFT", 52, 0)
+        row.stacksCB:Show()
+        row.stacksCB:SetChecked(row._stacksEnabled and true or false)
+      end
+      if row.stacksCompDD then
+        row.stacksCompDD:ClearAllPoints()
+        row.stacksCompDD:SetPoint("LEFT", row, "LEFT", 57, -3)
+      end
+      if row.stacksVal then
+        row.stacksVal:ClearAllPoints()
+        row.stacksVal:SetPoint("LEFT", row, "LEFT", 142, 0)
+      end
+      if row.stacksValEnter then
+        row.stacksValEnter:ClearAllPoints()
+        row.stacksValEnter:SetPoint("LEFT", row.stacksVal, "RIGHT", 4, 0)
+      end
+  
+      UpdateStacksVisibility()
+  
     elseif state == "INPUT" then
-      -- In INPUT mode, layout is:
-      --   [editbox or dropdown] ................................ [Add][X]
-      -- so the Add button sits closer to the X on the right side.
       local addWidth = row.addButton:GetWidth() or 40
       local rightGap = 2
       local totalRight = closeWidth + spacing + addWidth + rightGap
-
+  
       local editWidth = parentWidth - spacing - totalRight
-      if editWidth < 60 then
-        editWidth = 60
-      end
-
+      if editWidth < 60 then editWidth = 60 end
+  
       row.editBox:ClearAllPoints()
       row.addButton:ClearAllPoints()
-      if row.abilityDD then
-        row.abilityDD:ClearAllPoints()
-      end
-
-      -- edit/input area starts at x=0
+      if row.abilityDD then row.abilityDD:ClearAllPoints() end
+  
       row.editBox:SetWidth(editWidth)
       row.editBox:SetPoint("LEFT", row, "LEFT", 10, 0)
-
-      -- Add button sits just to the left of the close "X"
+  
       row.addButton:SetPoint("RIGHT", row.closeBtn, "LEFT", -rightGap, 0)
       row.addButton:SetText("Add")
-
+  
       if row._branch == "ABILITY" then
-        -- Ability branch: dropdown (starting at x=0) + Add
         if row.abilityDD then
           row.editBox:Hide()
-          row.abilityDD:SetPoint("LEFT", row, "LEFT", -15, -4)
+          row.abilityDD:SetPoint("LEFT", row, "LEFT", -15, -3)
           if UIDropDownMenu_SetWidth then
             pcall(UIDropDownMenu_SetWidth, editWidth, row.abilityDD)
           end
@@ -5810,11 +5841,10 @@ do
         end
         row.addButton:Show()
       else
-        -- Aura/Talent branch: manual spell/talent name input + Add
         row.editBox:Show()
         row.addButton:Show()
       end
-
+  
     elseif state == "SAVED" then
       row.labelFS:SetText(row._desc or "")
       row.labelFS:Show()
@@ -5829,11 +5859,31 @@ do
     row._choiceUnit = nil
     row._spellName = nil
     row._abilityPage = 1
-
+  
+    -- stacks reset
+    row._stacksEnabled = nil
+    row._stacksComp = nil
+    row._stacksVal = nil
+  
+    if row.stacksCB then
+      row.stacksCB:SetChecked(false)
+    end
+    if row.stacksVal and row.stacksVal.SetText then
+      row.stacksVal:SetText("")
+    end
+    if row.stacksCompDD then
+      if UIDropDownMenu_ClearAll then
+        pcall(UIDropDownMenu_ClearAll, row.stacksCompDD)
+      end
+      if UIDropDownMenu_SetText then
+        pcall(UIDropDownMenu_SetText, "", row.stacksCompDD)
+      end
+    end
+  
     if row.editBox and row.editBox.SetText then
       row.editBox:SetText("")
     end
-
+  
     if row.abilityDD then
       if UIDropDownMenu_ClearAll then
         pcall(UIDropDownMenu_ClearAll, row.abilityDD)
@@ -5842,7 +5892,7 @@ do
         pcall(UIDropDownMenu_SetText, "Select ability", row.abilityDD)
       end
     end
-
+  
     AuraCond_SetRowState(row, "STEP1")
   end
 
@@ -5874,12 +5924,19 @@ do
       row._choiceMode = (entry and entry.mode) or "found"
       row._choiceUnit = (entry and entry.unit) or "player"
       row._spellName = (entry and entry.name) or ""
-      row._desc = AuraCond_BuildDescription(
-          row._choiceBuffType,
-          row._choiceMode,
-          row._choiceUnit,
-          row._spellName
-      )
+	  row._stacksEnabled = (entry and entry.stacksEnabled) and true or nil
+	  row._stacksComp    = (entry and entry.stacksComp) or nil
+	  row._stacksVal     = (entry and entry.stacksVal) or nil
+	  
+	  row._desc = AuraCond_BuildDescription(
+		row._choiceBuffType,
+		row._choiceMode,
+		row._choiceUnit,
+		row._spellName,
+		row._stacksEnabled,
+		row._stacksComp,
+		row._stacksVal
+	  )
       AuraCond_SetRowState(row, "SAVED")
       row:Show()
     end
@@ -5984,12 +6041,24 @@ do
       return
     end
 
-    local entry = {
-      buffType = buffType,
-      mode = mode,
+	local entry = {
+	  buffType = buffType,
+	  mode = mode,
       unit = unit,
-      name = AuraCond_TitleCase(text),
-    }
+	  name = AuraCond_TitleCase(text),
+	}
+
+	-- only for aura (buff/debuff), store optional stack settings
+	if row._branch ~= "ABILITY" and row._branch ~= "TALENT" then
+	  entry.stacksEnabled = row._stacksEnabled and true or nil
+	if entry.stacksEnabled then
+      entry.stacksComp = row._stacksComp
+      entry.stacksVal  = row._stacksVal
+	else
+      entry.stacksComp = nil
+      entry.stacksVal  = nil
+	end
+  end
 
     local n = AuraCond_Len(list)
     list[n + 1] = entry
@@ -6040,6 +6109,31 @@ do
   -- simple counter so each dropdown gets a real (unique) frame name
   local AuraCond_RowCounter = (AuraCond_RowCounter or 0)
 
+  local function AuraCond_InitComparatorDD(ddframe, commitFunc)
+	UIDropDownMenu_Initialize(ddframe, function(frame, level, menuList)
+      local info
+      local choices = { ">=", "<=", "==" }
+      for _, c in ipairs(choices) do
+        local picked = c
+        info = {}
+        info.text = picked
+        info.value = picked
+        info.func = function(button)
+          local val = (button and button.value) or picked
+          if commitFunc then
+            pcall(commitFunc, val)
+          end
+          UIDropDownMenu_SetSelectedValue(ddframe, val)
+          UIDropDownMenu_SetText(val, ddframe)
+          CloseDropDownMenus()
+        end
+        info.checked = (UIDropDownMenu_GetSelectedValue(ddframe) == picked)
+        UIDropDownMenu_AddButton(info)
+      end
+    end)
+  end
+
+
   local function AuraCond_CreateRow(mgr, isEditing)
     AuraCond_RowCounter = AuraCond_RowCounter + 1
 
@@ -6075,6 +6169,38 @@ do
 
     local ddName = "DoiteAuraCond_AbilityDD_" .. tostring(mgr.typeKey or "X") .. "_" .. tostring(AuraCond_RowCounter)
     row.abilityDD = CreateFrame("Frame", ddName, row, "UIDropDownMenuTemplate")
+	
+	-- ✓ button (between content and X) used in STACKS stage
+	row.okBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+	row.okBtn:SetWidth(60)
+	row.okBtn:SetHeight(18)
+	row.okBtn:SetText("Continue") -- if your client font can't show this, change to "OK"
+	
+	-- stacks UI (only used in STACKS stage)
+	row.stacksLabel = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	row.stacksLabel:SetText("Stacks?")
+
+	row.stacksCB = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
+	row.stacksCB:SetWidth(18); row.stacksCB:SetHeight(18)
+
+	-- comparator dropdown (blank by default)
+	local dd2Name = "DoiteAuraCond_StacksCompDD_" .. tostring(mgr.typeKey or "X") .. "_" .. tostring(AuraCond_RowCounter)
+	row.stacksCompDD = CreateFrame("Frame", dd2Name, row, "UIDropDownMenuTemplate")
+
+	-- make stacks comparator dropdown narrower
+	row._stacksCompWidth = 45
+	if UIDropDownMenu_SetWidth then
+	  pcall(UIDropDownMenu_SetWidth, row._stacksCompWidth, row.stacksCompDD)
+	end
+	
+	row.stacksVal = CreateFrame("EditBox", nil, row, "InputBoxTemplate")
+	row.stacksVal:SetWidth(40)
+	row.stacksVal:SetHeight(18)
+	row.stacksVal:SetAutoFocus(false)
+	row.stacksVal:SetFontObject("GameFontNormalSmall")
+
+	row.stacksValEnter = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	row.stacksValEnter:SetText("(#)")
 
     row.btn1:SetWidth(mainWidth)
     row.btn2:SetWidth(mainWidth)
@@ -6139,6 +6265,7 @@ do
     YellowifyButton(row.btn3)
     YellowifyButton(row.addButton)
     YellowifyButton(row.closeBtn)
+	YellowifyButton(row.okBtn)
 
     -- progression buttons:
     row.btn1:SetScript("OnClick", function()
@@ -6172,11 +6299,17 @@ do
           AuraCond_SetRowState(row, "STEP3")
         end
 
-      elseif state == "STEP3" then
-        -- Aura: On player
-        row._choiceUnit = "player"
-        AuraCond_SetRowState(row, "INPUT")
-      end
+	  elseif state == "STEP3" then
+		-- Aura: On player
+		row._choiceUnit = "player"
+
+        -- If mode is "missing", skip STACKS entirely
+        if row._choiceMode == "missing" then
+          AuraCond_SetRowState(row, "INPUT")
+        else
+		  AuraCond_SetRowState(row, "STACKS")
+        end
+	  end
     end)
 
     row.btn2:SetScript("OnClick", function()
@@ -6205,16 +6338,42 @@ do
           AuraCond_SetRowState(row, "INPUT")
 
         else
-          -- Aura: Missing
+          -- Aura: Missing (no stacks possible)
           row._choiceMode = "missing"
+
+          -- hard reset stacks so "missing + stacks" can never be stored/used
+          row._stacksEnabled = nil
+          row._stacksComp = nil
+          row._stacksVal  = nil
+          if row.stacksCB then
+            row.stacksCB:SetChecked(false)
+          end
+          if row.stacksVal and row.stacksVal.SetText then
+            row.stacksVal:SetText("")
+          end
+          if row.stacksCompDD then
+            if UIDropDownMenu_ClearAll then
+              pcall(UIDropDownMenu_ClearAll, row.stacksCompDD)
+            end
+            if UIDropDownMenu_SetText then
+              pcall(UIDropDownMenu_SetText, "", row.stacksCompDD)
+            end
+          end
+
           AuraCond_SetRowState(row, "STEP3")
         end
 
-      elseif state == "STEP3" then
-        -- Aura: On target
-        row._choiceUnit = "target"
-        AuraCond_SetRowState(row, "INPUT")
-      end
+	  elseif state == "STEP3" then
+		-- Aura: On target
+		row._choiceUnit = "target"
+
+        -- If mode is "missing", skip STACKS entirely
+        if row._choiceMode == "missing" then
+          AuraCond_SetRowState(row, "INPUT")
+        else
+		  AuraCond_SetRowState(row, "STACKS")
+        end
+	  end
     end)
 
     row.btn3:SetScript("OnClick", function()
@@ -6274,6 +6433,62 @@ do
         _ReflowCondAreaHeight()
       end
     end)
+
+	-- init comparator dropdown (blank text)
+	AuraCond_InitComparatorDD(row.stacksCompDD, function(val)
+	  row._stacksComp = val
+	  -- just refresh Continue enabled-state (do NOT rebuild row)
+	  if row._state == "STACKS" then
+	    AuraCond_UpdateStacksUI(row)
+	  end
+	end)
+	if UIDropDownMenu_SetText then
+	  pcall(UIDropDownMenu_SetText, "", row.stacksCompDD)
+	end
+
+	row.stacksCB:SetScript("OnClick", function()
+	  row._stacksEnabled = this:GetChecked() and true or nil
+	  if not row._stacksEnabled then
+	    row._stacksComp = nil
+	    row._stacksVal  = nil
+	    if row.stacksVal and row.stacksVal.SetText then
+	      row.stacksVal:SetText("")
+	    end
+	    if UIDropDownMenu_ClearAll then
+	      pcall(UIDropDownMenu_ClearAll, row.stacksCompDD)
+	    end
+	    if UIDropDownMenu_SetText then
+	      pcall(UIDropDownMenu_SetText, "", row.stacksCompDD)
+	    end
+	  end
+
+	  if row._state == "STACKS" then
+	    AuraCond_UpdateStacksUI(row)
+	  end
+	end)
+
+	row.stacksVal:SetScript("OnTextChanged", function()
+	  row._stacksVal = row.stacksVal:GetText()
+	  if row._state == "STACKS" then
+	    AuraCond_UpdateStacksUI(row)
+	  end
+	end)
+
+	row.okBtn:SetScript("OnClick", function()
+	  if not currentKey then return end
+	  if row._state ~= "STACKS" then return end
+
+	  -- If stacks are enabled, require comparator + value
+	  if row._stacksEnabled then
+	    local comp = string.gsub(tostring(row._stacksComp or ""), "^%s*(.-)%s*$", "%1")
+	    local val  = string.gsub(tostring(row._stacksVal  or ""), "^%s*(.-)%s*$", "%1")
+	    if comp == "" or val == "" then
+	      return
+	    end
+	  end
+
+	  AuraCond_SetRowState(row, "INPUT")
+	end)
 
     if isEditing then
       AuraCond_OnCancelEditing(row)
@@ -6444,7 +6659,7 @@ do
     return string.sub(string.gsub(" " .. str, "%W%l", string.upper), 2)
   end
 
-  local function VfxCond_BuildDescription(buffType, mode, unit, name)
+  local function VfxCond_BuildDescription(buffType, mode, unit, name, stacksEnabled, stacksComp, stacksVal)
     local niceName = VfxCond_TitleCase(name or "")
   
     local yellow = "|cffffd000"
@@ -6470,12 +6685,9 @@ do
   
       local modePart = yellow .. modeWord .. "|r"
       local namePart = white .. (niceName or "") .. "|r"
-  
-      -- [blue]Ability|r | [yellow]Not on CD|r: [white]Sinister Strike|r
       return typePart .. " " .. sep .. modePart .. ": " .. namePart
   
     elseif bt == "TALENT" then
-      -- Talent rows: mode stored as "Known" or "Not known"
       local isKnown = (m == "known")
       local stateWord = isKnown and "Known" or "Not known"
       local stateColor = isKnown and "|cff00ff00" or "|cffff0000"
@@ -6483,8 +6695,6 @@ do
   
       local talentPart = yellow .. "Talent" .. "|r"
       local namePart   = white .. (niceName or "") .. "|r"
-  
-      -- Talent (yellow) | Known/Not known (green/red): Name (white)
       return talentPart .. " " .. sep .. statePart .. ": " .. namePart
     end
   
@@ -6495,22 +6705,30 @@ do
   
     local unitWord
     if u == "target" then
-      unitWord = "On target"
+      unitWord = "Target"
     else
-      unitWord = "On player"
+      unitWord = "Player"
     end
   
     local typeColor = isDebuff and "|cffff0000" or "|cff00ff00"
-  
     local typePart = typeColor .. typeWord .. "|r"
     local modePart = yellow .. modeWord .. "|r"
     local unitPart = yellow .. unitWord .. "|r"
-    local namePart = white .. (niceName or "") .. "|r"
   
-    -- [green/red]Buff|r [white]| |r [yellow]Found|r [white]| |r [yellow]On player|r: [white]Battle Shout|r
+    -- stacks prefix: ≥5xName, ≤3xName, =2xName
+    local prefix = ""
+    if stacksEnabled and stacksComp and stacksComp ~= "" and stacksVal and tostring(stacksVal) ~= "" then
+      local sym = stacksComp
+      if sym == ">=" then sym = "≥"
+      elseif sym == "<=" then sym = "≤"
+      elseif sym == "==" then sym = "="
+      end
+      prefix = tostring(sym) .. tostring(stacksVal) .. "x"
+    end
+  
+    local namePart = white .. prefix .. (niceName or "") .. "|r"
     return typePart .. " " .. sep .. modePart .. " " .. sep .. unitPart .. ": " .. namePart
   end
-
 
   local VfxCond_RowCounter = 0
 
@@ -6674,69 +6892,110 @@ do
     end
   end
 
+  -- Only update stacks widget visibility + Continue enabled-state (no row rebuild).
+  local function VfxCond_UpdateStacksUI(row)
+    if not row then return end
+
+    local enabled = row._stacksEnabled and true or false
+
+    if row.stacksCompDD then
+      if enabled then row.stacksCompDD:Show() else row.stacksCompDD:Hide() end
+    end
+    if row.stacksVal then
+      if enabled then row.stacksVal:Show() else row.stacksVal:Hide() end
+    end
+    if row.stacksValEnter then
+      if enabled then row.stacksValEnter:Show() else row.stacksValEnter:Hide() end
+    end
+
+    local ok = true
+    if enabled then
+      local comp = row._stacksComp
+      local val  = row._stacksVal
+      comp = string.gsub(tostring(comp or ""), "^%s*(.-)%s*$", "%1")
+      val  = string.gsub(tostring(val  or ""), "^%s*(.-)%s*$", "%1")
+      if comp == "" or val == "" then
+        ok = false
+      end
+    end
+    if row.okBtn and row.okBtn.SetEnabled then
+      row.okBtn:SetEnabled(ok and 1 or 0)
+    end
+  end
 
   local function VfxCond_SetRowState(row, state)
     row._state = state
-
+  
     row.btn1:Hide()
     row.btn2:Hide()
     if row.btn3 then row.btn3:Hide() end
     row.closeBtn:Show()
+    if row.okBtn then row.okBtn:Hide() end
     row.editBox:Hide()
     row.addButton:Hide()
     row.labelFS:Hide()
     if row.abilityDD then row.abilityDD:Hide() end
     if row.glowCB then row.glowCB:Hide() end
     if row.greyCB then row.greyCB:Hide() end
-
+  
+    if row.stacksLabel then row.stacksLabel:Hide() end
+    if row.stacksCB then row.stacksCB:Hide() end
+    if row.stacksCompDD then row.stacksCompDD:Hide() end
+    if row.stacksVal then row.stacksVal:Hide() end
+    if row.stacksValEnter then row.stacksValEnter:Hide() end
+  
     local spacing = row._spacing or 4
     local parentWidth = row._parentWidth or 260
     local closeWidth = row._closeWidth or 20
-
+  
+    local function UpdateStacksVisibility()
+      VfxCond_UpdateStacksUI(row)
+    end
+  
     if state == "STEP1" then
       row._branch = nil
       local available = parentWidth - closeWidth - spacing * 5
       if available < 80 then available = 80 end
       local w = math.floor(available / 4)
-
+  
       row.btn1:SetWidth(w)
       row.btn2:SetWidth(w)
       row.addButton:SetWidth(w)
       if row.btn3 then row.btn3:SetWidth(w) end
-
+  
       row.btn1:ClearAllPoints()
       row.btn2:ClearAllPoints()
       row.addButton:ClearAllPoints()
       if row.btn3 then row.btn3:ClearAllPoints() end
-
+  
       row.btn1:SetPoint("LEFT", row, "LEFT", 0, 0)
       row.btn2:SetPoint("LEFT", row.btn1, "RIGHT", spacing, 0)
       row.addButton:SetPoint("LEFT", row.btn2, "RIGHT", spacing, 0)
       if row.btn3 then row.btn3:SetPoint("LEFT", row.addButton, "RIGHT", spacing, 0) end
-
+  
       row.btn1:SetText("Ability")
       row.btn2:SetText("Buff")
       row.addButton:SetText("Debuff")
       if row.btn3 then row.btn3:SetText("Talent") end
-
+  
       row.btn1:Show()
       row.btn2:Show()
       row.addButton:Show()
       if row.btn3 then row.btn3:Show() end
-
+  
     elseif state == "STEP2" then
       local available = parentWidth - closeWidth - spacing * 3
       if available < 120 then available = 120 end
       local w = math.floor(available / 2)
-
+  
       row.btn1:SetWidth(w)
       row.btn2:SetWidth(w)
-
+  
       row.btn1:ClearAllPoints()
       row.btn2:ClearAllPoints()
       row.btn1:SetPoint("LEFT", row, "LEFT", 0, 0)
       row.btn2:SetPoint("LEFT", row.btn1, "RIGHT", spacing, 0)
-
+  
       if row._branch == "ABILITY" then
         row.btn1:SetText("Not on CD")
         row.btn2:SetText("On CD")
@@ -6747,82 +7006,114 @@ do
         row.btn1:SetText("Found")
         row.btn2:SetText("Missing")
       end
-
+  
       row.btn1:Show()
       row.btn2:Show()
-
+  
     elseif state == "STEP3" then
       local available = parentWidth - closeWidth - spacing * 3
       if available < 120 then available = 120 end
       local w = math.floor(available / 2)
-
+  
       row.btn1:SetWidth(w)
       row.btn2:SetWidth(w)
-
+  
       row.btn1:ClearAllPoints()
       row.btn2:ClearAllPoints()
       row.btn1:SetPoint("LEFT", row, "LEFT", 0, 0)
       row.btn2:SetPoint("LEFT", row.btn1, "RIGHT", spacing, 0)
-
+  
       row.btn1:SetText("On player")
       row.btn2:SetText("On target")
       row.btn1:Show()
       row.btn2:Show()
-
-	elseif state == "INPUT" then
-	  local addWidth = row.addButton:GetWidth() or 40
-	  local rightGap = 2
-	  local totalRight = closeWidth + spacing + addWidth + rightGap
-
-	  local editWidth = parentWidth - spacing - totalRight
-	  if editWidth < 60 then editWidth = 60 end
-
-	  row.editBox:ClearAllPoints()
-	  row.addButton:ClearAllPoints()
-	  if row.abilityDD then
-		row.abilityDD:ClearAllPoints()
-	  end
-
-	  row.editBox:SetWidth(editWidth)
-	  row.editBox:SetPoint("LEFT", row, "LEFT", 10, 0)
-
-	  row.addButton:SetPoint("RIGHT", row.closeBtn, "LEFT", -rightGap, 0)
-	  row.addButton:SetText("Add")
-
-	  if row._branch == "ABILITY" then
-		-- Ability branch: dropdown like AuraCond
-		if row.abilityDD then
-		  row.editBox:Hide()
-		  row.abilityDD:SetPoint("LEFT", row, "LEFT", -15, -4)
-		  if UIDropDownMenu_SetWidth then
-			pcall(UIDropDownMenu_SetWidth, editWidth, row.abilityDD)
-		  end
-		  VfxCond_InitAbilityDropdown(row)
-		  row.abilityDD:Show()
-		end
-		row.addButton:Show()
-	  else
-		-- Buff/Debuff/Talent: free text
-		if row.abilityDD then row.abilityDD:Hide() end
-		row.editBox:Show()
-		row.addButton:Show()
-	  end
-
+  
+    elseif state == "STACKS" then
+      -- Layout: Stacks? [ ] [DD] [Edit] (#) [Continue] [X]
+      if row.okBtn then row.okBtn:Show() end
+  
+      row.closeBtn:ClearAllPoints()
+      if row.okBtn then row.okBtn:ClearAllPoints() end
+  
+      row.closeBtn:SetPoint("RIGHT", row, "RIGHT", 0, 0)
+      if row.okBtn then
+       row.okBtn:SetPoint("RIGHT", row.closeBtn, "LEFT", -spacing, 0)
+      end
+  
+      if row.stacksLabel then
+        row.stacksLabel:ClearAllPoints()
+        row.stacksLabel:SetPoint("LEFT", row, "LEFT", 0, 0)
+        row.stacksLabel:Show()
+      end
+      if row.stacksCB then
+        row.stacksCB:ClearAllPoints()
+        row.stacksCB:SetPoint("LEFT", row, "LEFT", 52, 0)
+        row.stacksCB:Show()
+        row.stacksCB:SetChecked(row._stacksEnabled and true or false)
+      end
+      if row.stacksCompDD then
+        row.stacksCompDD:ClearAllPoints()
+        row.stacksCompDD:SetPoint("LEFT", row, "LEFT", 57, -3)
+      end
+      if row.stacksVal then
+        row.stacksVal:ClearAllPoints()
+        row.stacksVal:SetPoint("LEFT", row, "LEFT", 142, 0)
+      end
+      if row.stacksValEnter then
+        row.stacksValEnter:ClearAllPoints()
+        row.stacksValEnter:SetPoint("LEFT", row.stacksVal, "RIGHT", 4, 0)
+      end
+  
+      UpdateStacksVisibility()
+  
+    elseif state == "INPUT" then
+      local addWidth = row.addButton:GetWidth() or 40
+      local rightGap = 2
+      local totalRight = closeWidth + spacing + addWidth + rightGap
+  
+      local editWidth = parentWidth - spacing - totalRight
+      if editWidth < 60 then editWidth = 60 end
+  
+      row.editBox:ClearAllPoints()
+      row.addButton:ClearAllPoints()
+      if row.abilityDD then row.abilityDD:ClearAllPoints() end
+  
+      row.editBox:SetWidth(editWidth)
+      row.editBox:SetPoint("LEFT", row, "LEFT", 10, 0)
+  
+      row.addButton:SetPoint("RIGHT", row.closeBtn, "LEFT", -rightGap, 0)
+      row.addButton:SetText("Add")
+  
+      if row._branch == "ABILITY" then
+        if row.abilityDD then
+          row.editBox:Hide()
+          row.abilityDD:SetPoint("LEFT", row, "LEFT", -15, -3)
+          if UIDropDownMenu_SetWidth then
+            pcall(UIDropDownMenu_SetWidth, editWidth, row.abilityDD)
+          end
+          VfxCond_InitAbilityDropdown(row)
+          row.abilityDD:Show()
+        end
+       row.addButton:Show()
+      else
+        if row.abilityDD then row.abilityDD:Hide() end
+        row.editBox:Show()
+        row.addButton:Show()
+      end
+  
     elseif state == "SAVED" then
       row.labelFS:SetText(row._desc or "")
       row.labelFS:Show()
-
+  
       if row.glowCB and row.greyCB then
         row.labelFS:ClearAllPoints()
         row.labelFS:SetPoint("TOPLEFT", row, "TOPLEFT", 0, 0)
-        row.labelFS:SetWidth(parentWidth - 30) -- Full width (minus delete button)
-
-        -- row below text for checkboxes
+  
         row.glowCB:ClearAllPoints()
         row.greyCB:ClearAllPoints()
         row.glowCB:SetPoint("TOPLEFT", row, "TOPLEFT", 0, -14)
         row.greyCB:SetPoint("LEFT", row.glowCB, "RIGHT", 40, 0)
-
+  
         row.glowCB:Show()
         row.greyCB:Show()
       end
@@ -6836,6 +7127,26 @@ do
     row._choiceUnit = nil
     row._spellName = nil
     row._abilityPage = 1
+  
+    -- stacks reset
+    row._stacksEnabled = nil
+    row._stacksComp = nil
+    row._stacksVal = nil
+  
+    if row.stacksCB then
+      row.stacksCB:SetChecked(false)
+    end
+    if row.stacksVal and row.stacksVal.SetText then
+      row.stacksVal:SetText("")
+    end
+    if row.stacksCompDD then
+      if UIDropDownMenu_ClearAll then
+        pcall(UIDropDownMenu_ClearAll, row.stacksCompDD)
+     end
+      if UIDropDownMenu_SetText then
+        pcall(UIDropDownMenu_SetText, "", row.stacksCompDD)
+      end
+    end
   
     if row.editBox and row.editBox.SetText then
       row.editBox:SetText("")
@@ -6876,12 +7187,19 @@ do
       row._choiceMode = (entry and entry.mode) or "found"
       row._choiceUnit = (entry and entry.unit) or "player"
       row._spellName = (entry and entry.name) or ""
-      row._desc = VfxCond_BuildDescription(
-        row._choiceBuffType,
-        row._choiceMode,
-        row._choiceUnit,
-        row._spellName
-      )
+	  row._stacksEnabled = (entry and entry.stacksEnabled) and true or nil
+	  row._stacksComp    = (entry and entry.stacksComp) or nil
+	  row._stacksVal     = (entry and entry.stacksVal) or nil
+
+	  row._desc = VfxCond_BuildDescription(
+	    row._choiceBuffType,
+		row._choiceMode,
+		row._choiceUnit,
+		row._spellName,
+		row._stacksEnabled,
+		row._stacksComp,
+		row._stacksVal
+	  )
 
       if row.glowCB then
         row.glowCB:SetChecked(entry and entry.glow)
@@ -6983,12 +7301,24 @@ do
       return
     end
 
-    local entry = {
-      buffType = buffType,
-      mode = mode,
-      unit = unit,
-      name = VfxCond_TitleCase(text),
-    }
+	local entry = {
+	  buffType = buffType,
+	  mode = mode,
+	  unit = unit,
+	  name = VfxCond_TitleCase(text),
+	}
+
+	-- only for aura (buff/debuff), store optional stack settings
+	if row._branch ~= "ABILITY" and row._branch ~= "TALENT" then
+	  entry.stacksEnabled = row._stacksEnabled and true or nil
+	  if entry.stacksEnabled then
+        entry.stacksComp = row._stacksComp
+        entry.stacksVal  = row._stacksVal
+	  else
+        entry.stacksComp = nil
+        entry.stacksVal  = nil
+      end
+    end
 
     local n = VfxCond_Len(list)
     list[n + 1] = entry
@@ -7013,6 +7343,30 @@ do
     list[n] = nil
 
     VfxCond_RebuildFromDB_Internal(mgr.typeKey)
+  end
+
+  local function VfxCond_InitComparatorDD(ddframe, commitFunc)
+    UIDropDownMenu_Initialize(ddframe, function(frame, level, menuList)
+      local info
+      local choices = { ">=", "<=", "==" }
+      for _, c in ipairs(choices) do
+        local picked = c
+        info = {}
+        info.text = picked
+        info.value = picked
+        info.func = function(button)
+          local val = (button and button.value) or picked
+          if commitFunc then
+            pcall(commitFunc, val)
+          end
+          UIDropDownMenu_SetSelectedValue(ddframe, val)
+          UIDropDownMenu_SetText(val, ddframe)
+          CloseDropDownMenus()
+        end
+        info.checked = (UIDropDownMenu_GetSelectedValue(ddframe) == picked)
+        UIDropDownMenu_AddButton(info)
+      end
+    end)
   end
 
   local function VfxCond_CreateRow(mgr, isEditing)
@@ -7047,6 +7401,37 @@ do
 	local ddName = "DoiteVfxCond_AbilityDD_" .. tostring(mgr.typeKey or "X") .. "_" .. tostring(VfxCond_RowCounter)
 	row.abilityDD = CreateFrame("Frame", ddName, row, "UIDropDownMenuTemplate")
 	row._abilityPage = 1
+	
+	-- Continue button (between content and X) used in STACKS stage
+	row.okBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+	row.okBtn:SetWidth(60)
+	row.okBtn:SetHeight(18)
+	row.okBtn:SetText("Continue")
+
+	-- stacks UI (only used in STACKS stage)
+	row.stacksLabel = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	row.stacksLabel:SetText("Stacks?")
+
+	row.stacksCB = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
+	row.stacksCB:SetWidth(18); row.stacksCB:SetHeight(18)
+
+	local dd2Name = "DoiteVfxCond_StacksCompDD_" .. tostring(mgr.typeKey or "X") .. "_" .. tostring(VfxCond_RowCounter)
+	row.stacksCompDD = CreateFrame("Frame", dd2Name, row, "UIDropDownMenuTemplate")
+
+	-- make stacks comparator dropdown narrower
+	row._stacksCompWidth = 45
+	if UIDropDownMenu_SetWidth then
+	  pcall(UIDropDownMenu_SetWidth, row._stacksCompWidth, row.stacksCompDD)
+	end
+
+	row.stacksVal = CreateFrame("EditBox", nil, row, "InputBoxTemplate")
+	row.stacksVal:SetWidth(40)
+	row.stacksVal:SetHeight(18)
+	row.stacksVal:SetAutoFocus(false)
+	row.stacksVal:SetFontObject("GameFontNormalSmall")
+
+	row.stacksValEnter = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	row.stacksValEnter:SetText("(#)")
 
     row.btn1:SetWidth(mainWidth)
     row.btn2:SetWidth(mainWidth)
@@ -7108,11 +7493,12 @@ do
       if fs and fs.SetTextColor then fs:SetTextColor(1, 0.82, 0) end
     end
 
-    YellowifyButton(row.btn1)
-    YellowifyButton(row.btn2)
-    YellowifyButton(row.btn3)
-    YellowifyButton(row.addButton)
-    YellowifyButton(row.closeBtn)
+	YellowifyButton(row.btn1)
+	YellowifyButton(row.btn2)
+	YellowifyButton(row.btn3)
+	YellowifyButton(row.addButton)
+	YellowifyButton(row.closeBtn)
+	YellowifyButton(row.okBtn)
 
     -- Button click handlers
     row.btn1:SetScript("OnClick", function()
@@ -7132,10 +7518,14 @@ do
           row._choiceMode = "found"
           VfxCond_SetRowState(row, "STEP3")
         end
-      elseif state == "STEP3" then
-        row._choiceUnit = "player"
-        VfxCond_SetRowState(row, "INPUT")
-      end
+		elseif state == "STEP3" then
+	      row._choiceUnit = "player"
+          if row._choiceMode == "missing" then
+            VfxCond_SetRowState(row, "INPUT")
+          else
+	        VfxCond_SetRowState(row, "STACKS")
+          end
+	    end
     end)
 
     row.btn2:SetScript("OnClick", function()
@@ -7153,12 +7543,36 @@ do
           VfxCond_SetRowState(row, "INPUT")
         else
           row._choiceMode = "missing"
+
+          -- hard reset stacks so "missing + stacks" can never be stored/used
+          row._stacksEnabled = nil
+          row._stacksComp = nil
+          row._stacksVal  = nil
+          if row.stacksCB then
+            row.stacksCB:SetChecked(false)
+          end
+          if row.stacksVal and row.stacksVal.SetText then
+            row.stacksVal:SetText("")
+          end
+          if row.stacksCompDD then
+            if UIDropDownMenu_ClearAll then
+              pcall(UIDropDownMenu_ClearAll, row.stacksCompDD)
+            end
+            if UIDropDownMenu_SetText then
+              pcall(UIDropDownMenu_SetText, "", row.stacksCompDD)
+            end
+          end
+
           VfxCond_SetRowState(row, "STEP3")
         end
-      elseif state == "STEP3" then
-        row._choiceUnit = "target"
-        VfxCond_SetRowState(row, "INPUT")
-      end
+		elseif state == "STEP3" then
+		  row._choiceUnit = "target"
+          if row._choiceMode == "missing" then
+            VfxCond_SetRowState(row, "INPUT")
+          else
+		    VfxCond_SetRowState(row, "STACKS")
+          end
+		end
     end)
 
     row.addButton:SetScript("OnClick", function()
@@ -7191,6 +7605,61 @@ do
     row.editBox:SetScript("OnEnterPressed", function()
       VfxCond_OnAdd(row)
     end)
+
+	-- init comparator dropdown (blank text)
+	VfxCond_InitComparatorDD(row.stacksCompDD, function(val)
+	  row._stacksComp = val
+	  if row._state == "STACKS" then
+	    VfxCond_UpdateStacksUI(row)
+	  end
+	end)
+
+	if UIDropDownMenu_SetText then
+	  pcall(UIDropDownMenu_SetText, "", row.stacksCompDD)
+	end
+
+	row.stacksCB:SetScript("OnClick", function()
+	  row._stacksEnabled = this:GetChecked() and true or nil
+	  if not row._stacksEnabled then
+	    row._stacksComp = nil
+	    row._stacksVal  = nil
+	    if row.stacksVal and row.stacksVal.SetText then
+	      row.stacksVal:SetText("")
+	    end
+	    if UIDropDownMenu_ClearAll then
+	      pcall(UIDropDownMenu_ClearAll, row.stacksCompDD)
+	    end
+	    if UIDropDownMenu_SetText then
+	      pcall(UIDropDownMenu_SetText, "", row.stacksCompDD)
+	    end
+	  end
+	  if row._state == "STACKS" then
+	    VfxCond_UpdateStacksUI(row)
+	  end
+	end)
+
+	row.stacksVal:SetScript("OnTextChanged", function()
+	  row._stacksVal = row.stacksVal:GetText()
+	  if row._state == "STACKS" then
+	    VfxCond_UpdateStacksUI(row)
+	  end
+	end)
+
+	row.okBtn:SetScript("OnClick", function()
+	  if not currentKey then return end
+	  if row._state ~= "STACKS" then return end
+
+	  -- If stacks are enabled, require comparator + value
+	  if row._stacksEnabled then
+	    local comp = string.gsub(tostring(row._stacksComp or ""), "^%s*(.-)%s*$", "%1")
+	    local val  = string.gsub(tostring(row._stacksVal  or ""), "^%s*(.-)%s*$", "%1")
+	    if comp == "" or val == "" then
+	      return
+	    end
+	  end
+
+	  VfxCond_SetRowState(row, "INPUT")
+	end)
 
     row._state = "SAVED"
     VfxCond_SetRowState(row, "SAVED")

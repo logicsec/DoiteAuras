@@ -35,6 +35,8 @@ local GetNumTalentTabs = GetNumTalentTabs
 local GetNumTalents = GetNumTalents
 local GetTalentInfo = GetTalentInfo
 local _GetTime = GetTime
+local _GetAuraStacksOnUnit
+local _StacksPasses
 local str_find = string.find
 local str_gsub = string.gsub
 local SpellUsableArgCache = {}
@@ -2586,7 +2588,7 @@ local function _AuraConditions_CheckEntry(entry)
         return false
       end
 
-      -- Treat pure global cooldown (very short duration) as "not really on cooldown" to avoid flickering auraConditions when other spells trigger the GCD.
+      -- Treat pure global cooldown (very short duration) as "not really on cooldown"
       local onCd = false
       if rem and rem > 0 then
         if dur and dur > 1.5 then
@@ -2599,11 +2601,9 @@ local function _AuraConditions_CheckEntry(entry)
       if entry.mode == "notcd" then
         return (not onCd)
       else
-        -- "oncd"
         return onCd
       end
     else
-      -- Unsupported mode for ABILITY; ignore rather than fail
       return true
     end
   end
@@ -2617,7 +2617,6 @@ local function _AuraConditions_CheckEntry(entry)
     local modeKey = _DA_TalentModeKeyByRaw[modeRaw]
     if not modeKey then
       modeKey = string.lower(modeRaw)
-      -- Normalize: "Not Known", "not known", "notknown" -> "notknown"
       modeKey = str_gsub(modeKey, "%s+", "")
       _DA_TalentModeKeyByRaw[modeRaw] = modeKey
     end
@@ -2629,43 +2628,103 @@ local function _AuraConditions_CheckEntry(entry)
     elseif modeKey == "notknown" then
       return (not isKnown)
     else
-      -- Unknown mode => do not fail the whole list
       return true
     end
   end
-  -- === END TALENT CONDITION BRANCH (Known / Not known) ===
+  -- === END TALENT CONDITION BRANCH ===
 
-  local hasAura = false
+  ----------------------------------------------------------------
+  -- BUFF / DEBUFF branch: check unit auras (+ optional stacks)
+  ----------------------------------------------------------------
   local wantDebuff = (entry.buffType == "DEBUFF")
 
-  -- BUFF / DEBUFF branch: check unit auras
   local unit = entry.unit or "player"
   if unit ~= "player" and unit ~= "target" then
     unit = "player"
   end
 
   -- If explicitly target "target" but have no target, do not pass
+  if unit == "target" and (not UnitExists("target")) then
+    return false
+  end
+
+  ----------------------------------------------------------------
+  -- Stacks config (AURA ONLY)
+  -- If stacksEnabled but missing comp/val => treat as disabled.
+  -- Cache parsed numeric threshold per-entry (no allocations).
+  ----------------------------------------------------------------
+  local stacksEnabled = (entry.stacksEnabled == true) and (entry.mode == "found")
+  local stacksComp = nil
+  local stacksThr = nil
+
+  if stacksEnabled then
+    stacksComp = entry.stacksComp
+    if not stacksComp or stacksComp == "" then
+      stacksEnabled = false
+    else
+      local raw = entry.stacksVal
+      if raw == nil or raw == "" then
+        stacksEnabled = false
+      else
+        -- cache tonumber(raw) on the entry (runtime-only)
+        if entry._daStacksValRaw ~= raw then
+          entry._daStacksValRaw = raw
+          local n = tonumber(raw)
+          if n and n >= 0 then
+            entry._daStacksValNum = n
+          else
+            entry._daStacksValNum = nil
+          end
+        end
+        stacksThr = entry._daStacksValNum
+        if stacksThr == nil then
+          stacksEnabled = false
+        end
+      end
+    end
+  end
+
+  ----------------------------------------------------------------
+  -- Has aura?
+  ----------------------------------------------------------------
+  local hasAura = false
+
   if unit == "player" then
-    if not wantDebuff and DoitePlayerAuras.HasBuff(name) then
+    if (not wantDebuff) and DoitePlayerAuras.HasBuff(name) then
       hasAura = true
     elseif wantDebuff and DoitePlayerAuras.HasDebuff(name) then
       hasAura = true
     end
-  elseif unit == "target" then
-    if not UnitExists("target") then
-      return false
-    end
-
+  else
+    -- unit == "target"
     hasAura = _TargetHasAura(name, wantDebuff)
   end
 
+  ----------------------------------------------------------------
+  -- If stacks enabled and aura exists, compute stacks and compare.
+  ----------------------------------------------------------------
+  if stacksEnabled and hasAura then
+    local cnt = _GetAuraStacksOnUnit(unit, name, wantDebuff)
+    if cnt == nil then
+      cnt = 1
+    end
+    entry._daStacksLast = cnt
+  
+    local pass = _StacksPasses(cnt, stacksComp, stacksThr)
+  
+    -- stacksEnabled implies entry.mode == "found" (see gate above)
+    return pass
+  end
+
+  ----------------------------------------------------------------
+  -- No stacks logic (or aura not present): original semantics
+  ----------------------------------------------------------------
   if entry.mode == "found" then
     return hasAura
   elseif entry.mode == "missing" then
     return (not hasAura)
   end
 
-  -- Unknown mode => do not fail the whole list
   return true
 end
 
@@ -2706,7 +2765,7 @@ end
 -- === Stacks helpers ===
 
 -- Compare: returns true if 'cnt' satisfies 'comp' vs 'target'
-local function _StacksPasses(cnt, comp, target)
+_StacksPasses = function(cnt, comp, target)
   if not cnt or not comp or target == nil then
     return true
   end
@@ -2721,7 +2780,7 @@ local function _StacksPasses(cnt, comp, target)
 end
 
 -- Get stack count for a named aura on target (or player). Uses DoitePlayerAuras for player checks.
-local function _GetAuraStacksOnUnit(unit, auraName, wantDebuff)
+_GetAuraStacksOnUnit = function(unit, auraName, wantDebuff)
   if not unit or not auraName then
     return nil
   end
