@@ -2545,6 +2545,8 @@ local function RefreshIcons()
         if isClickable then
              f:EnableMouse(true)
              f:SetScript("OnClick", function()
+                 -- Block item use while in edit mode (Issue #50)
+                 if _G["DoiteEdit_CurrentKey"] then return end
                  if arg1 == "LeftButton" or arg1 == "RightButton" then
                     -- Fallback to 'key' if name is missing (fixes nil error)
                     local n = (data.displayName or data.name) or key
