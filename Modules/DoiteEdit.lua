@@ -1668,7 +1668,7 @@ local function CreateConditionsUI()
   condFrame.cond_ability_hp_val_enter:Hide()
   SetSeparator("ability", 9, "HEALTH CONDITION", true, true)
 
-  condFrame.cond_ability_text_time = MakeCheck("DoiteCond_Ability_TextTime", "Icon text: Remaining", 0, row10_y)
+  condFrame.cond_ability_text_time = MakeCheck("DoiteCond_Ability_TextTime", "Icon text: Time remaining", 0, row10_y)
   SetSeparator("ability", 10, "ICON TEXT", true, true)
 
   -- Combo points dropdown (class-specific: druid / rogue)
@@ -1848,8 +1848,8 @@ local function CreateConditionsUI()
   condFrame.cond_aura_stacks_val_enter:SetText("(#)")
   condFrame.cond_aura_stacks_val_enter:Hide()
 
-  condFrame.cond_aura_text_time = MakeCheck("DoiteCond_Aura_TextTime", "Icon text: Remaining", 0, row11_y - 11)
-  condFrame.cond_aura_text_stack = MakeCheck("DoiteCond_Aura_TextStack", "Icon text: Stacks", 150, row11_y - 11)
+  condFrame.cond_aura_text_time = MakeCheck("DoiteCond_Aura_TextTime", "Icon text: Time remaining", 0, row11_y - 11)
+  condFrame.cond_aura_text_stack = MakeCheck("DoiteCond_Aura_TextStack", "Icon text: Stacks", 165, row11_y - 11)
   SetSeparator("aura", 10, "TIME REMAINING & STACKS", true, true)
 
   -- Class-specific (combo points)
