@@ -625,6 +625,15 @@ local function InitGroupDropdown(dd, data)
     for _, choice in ipairs(choices) do
       info = {}
       info.text = choice
+      
+      -- SHOW ALIAS IN DROPDOWN
+      if choice ~= "No" and DoiteAurasDB and DoiteAurasDB.groupAlias then
+          local alias = DoiteAurasDB.groupAlias[choice]
+          if alias and alias ~= "" then
+              info.text = alias
+          end
+      end
+      
       info.value = choice
       local pickedChoice = choice
       info.func = function(button)

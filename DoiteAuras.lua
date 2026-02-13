@@ -7,6 +7,36 @@
 
 if DoiteAurasFrame then return end
 
+StaticPopupDialogs["DOITE_RENAME_GROUP"] = {
+  text = "Enter alias for %s:",
+  button1 = "Set",
+  button2 = "Cancel",
+  hasEditBox = 1,
+  maxLetters = 20,
+  OnShow = function()
+    local groupName = this.data
+    local currentAlias = DoiteAurasDB.groupAlias and DoiteAurasDB.groupAlias[groupName] or ""
+    _G[this:GetName().."EditBox"]:SetText(currentAlias)
+    _G[this:GetName().."EditBox"]:SetFocus()
+  end,
+  OnAccept = function()
+    local text = _G[this:GetParent():GetName().."EditBox"]:GetText()
+    local groupName = this:GetParent().data 
+    
+    DoiteAurasDB.groupAlias = DoiteAurasDB.groupAlias or {}
+    if text and text ~= "" then
+        DoiteAurasDB.groupAlias[groupName] = text
+    else
+        DoiteAurasDB.groupAlias[groupName] = nil
+    end
+    
+    if DoiteAuras_RefreshList then DoiteAuras_RefreshList() end
+  end,
+  timeout = 0,
+  whileDead = 1,
+  hideOnEscape = 1
+}
+
 -- SavedVariables init (guarded; do NOT clobber existing data)
 DoiteAurasDB = DoiteAurasDB or {}
 DoiteAurasDB.spells         = DoiteAurasDB.spells         or {}
@@ -2810,6 +2840,32 @@ local function RefreshList()
 					end
 				end)
 
+                -- NEW: Edit Button (Left of Group Name)
+                hdr.renameBtn = CreateFrame("Button", nil, hdr)
+                hdr.renameBtn:SetWidth(12); hdr.renameBtn:SetHeight(12)
+                hdr.renameBtn:SetPoint("LEFT", hdr.expandBut, "RIGHT", 2, 0)
+                
+                local tex = hdr.renameBtn:CreateTexture(nil, "ARTWORK")
+                tex:SetAllPoints()
+                tex:SetTexture("Interface\\Buttons\\UI-OptionsButton")
+                hdr.renameBtn:SetNormalTexture(tex)
+                
+                local hi = hdr.renameBtn:CreateTexture(nil, "HIGHLIGHT")
+                hi:SetAllPoints()
+                hi:SetTexture("Interface\\Buttons\\ButtonHilight-Square")
+                hi:SetBlendMode("ADD")
+                hdr.renameBtn:SetHighlightTexture(hi)
+
+                hdr.renameBtn:SetScript("OnClick", function()
+                    local p = this:GetParent()
+                    if not p or not p.groupName then return end
+                    StaticPopup_Show("DOITE_RENAME_GROUP", p.groupName)
+                end)
+
+                -- Re-anchor Label
+                hdr.label = hdr:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+                hdr.label:SetPoint("LEFT", hdr.renameBtn, "RIGHT", 4, 0)
+
                 -- Disable checkbox (created once; shown/hidden per header)
                 hdr.disableCheck = CreateFrame("CheckButton", nil, hdr, "UICheckButtonTemplate")
                 hdr.disableCheck:SetWidth(14); hdr.disableCheck:SetHeight(14)
@@ -2946,7 +3002,13 @@ local function RefreshList()
 
             -- Update dynamic header text
             hdr.groupName = entry.groupName or ""
-            local hdrName = string.upper(hdr.groupName or "")
+            
+            local alias = nil
+            if entry.kind == "group" and DoiteAurasDB and DoiteAurasDB.groupAlias then
+                alias = DoiteAurasDB.groupAlias[hdr.groupName]
+            end
+
+            local hdrName = string.upper(alias or hdr.groupName or "")
             hdr.label:SetText(hdrName)
 
             -- Bucket key + disable toggle visibility/state
