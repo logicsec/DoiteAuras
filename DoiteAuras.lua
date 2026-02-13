@@ -15,6 +15,9 @@ DoiteAurasDB.groupSort       = DoiteAurasDB.groupSort       or {}
 DoiteAurasDB.bucketDisabled  = DoiteAurasDB.bucketDisabled  or {}
 DoiteAurasDB.bucketCollapsed = DoiteAurasDB.bucketCollapsed or {}
 DoiteAurasDB.pfuiBorder      = DoiteAurasDB.pfuiBorder
+if DoiteAurasDB.showtooltip == nil then
+  DoiteAurasDB.showtooltip = true
+end
 DoiteAuras = DoiteAuras or {}
 
 -- Always return a valid name->texture cache table
@@ -1950,6 +1953,71 @@ local function DA_UseItemByName(itemName)
     if DEFAULT_CHAT_FRAME then DEFAULT_CHAT_FRAME:AddMessage("DoiteAuras: Item [" .. itemName .. "] NOT FOUND in bags or inventory.") end
 end
 
+local function DA_ShowDetailedItemTooltip(frame, itemName)
+    if not itemName or itemName == "" then return end
+
+    -- Smart anchor: pick a direction that keeps the tooltip on-screen
+    local anchor = "ANCHOR_RIGHT"
+    if frame.GetCenter and UIParent.GetWidth then
+        local cx, cy = frame:GetCenter()
+        local sw = UIParent:GetWidth()
+        local sh = UIParent:GetHeight()
+        if cx and sw and cy and sh then
+            local rightEdge = cx > (sw * 0.75)
+            local topEdge   = cy > (sh * 0.75)
+            if rightEdge and topEdge then
+                anchor = "ANCHOR_BOTTOMLEFT"
+            elseif rightEdge then
+                anchor = "ANCHOR_LEFT"
+            elseif topEdge then
+                anchor = "ANCHOR_BOTTOM"
+            end
+        end
+    end
+
+    GameTooltip:SetOwner(frame, anchor)
+
+    -- 1) Scan equipped inventory
+    for slot = 0, 19 do
+        local link = GetInventoryItemLink("player", slot)
+        if link then
+            local _, _, name = string.find(link, "%[(.+)%]")
+            if name and name == itemName then
+                GameTooltip:SetInventoryItem("player", slot)
+                GameTooltip:Show()
+                return
+            end
+        end
+    end
+
+    -- 2) Scan bags
+    for bag = 0, 4 do
+        local slots = GetContainerNumSlots(bag)
+        if slots and slots > 0 then
+            for slot = 1, slots do
+                local link = GetContainerItemLink(bag, slot)
+                if link then
+                    local _, _, name = string.find(link, "%[(.+)%]")
+                    if name and name == itemName then
+                        GameTooltip:SetBagItem(bag, slot)
+                        GameTooltip:Show()
+                        return
+                    end
+                end
+            end
+        end
+    end
+
+    -- 3) Fallback to basic info if item not currently held
+    local _, link = GetItemInfo(itemName)
+    if link then
+        GameTooltip:SetHyperlink(link)
+    else
+        GameTooltip:AddLine(itemName)
+    end
+    GameTooltip:Show()
+end
+
 -- Create or update icon *structure only* (no positioning or texture changes here)
 local function CreateOrUpdateIcon(key, layer)
     local globalName = "DoiteIcon_" .. key
@@ -2541,23 +2609,55 @@ local function RefreshIcons()
         -- Only allow clicking if configured, NOT greyed out, and NOT in edit mode
         -- STRICTLY restrict to Items only
         local isClickable = (data and data.type == "Item" and ic and ic.clickable and (not f._daDragging) and (not _G["DoiteEdit_CurrentKey"]))
+        -- Always show tooltips for items when not in edit mode
+        -- Show tooltips for items only when enabled in DB and not in edit mode
+		local showTooltips = (data and data.type == "Item"
+			and (DoiteAurasDB and DoiteAurasDB.showtooltip == true)
+			and (not f._daDragging)
+			and (not _G["DoiteEdit_CurrentKey"]))
 
-        if isClickable then
+        if _G["DoiteEdit_CurrentKey"] then
+            showTooltips = false
+        end
+
+        if isClickable or showTooltips then
              f:EnableMouse(true)
-             f:SetScript("OnClick", function()
-                 if arg1 == "LeftButton" or arg1 == "RightButton" then
-                    -- Fallback to 'key' if name is missing (fixes nil error)
-                    local n = (data.displayName or data.name) or key
-                    if n and n ~= "" then
-                         DA_UseItemByName(n)
-                    end
-                 end
-             end)
+             
+             if isClickable then
+                 f:SetScript("OnClick", function()
+                     -- Block item use while in edit mode (Issue #50)
+                     if _G["DoiteEdit_CurrentKey"] then return end
+                     if arg1 == "LeftButton" or arg1 == "RightButton" then
+                        -- Fallback to 'key' if name is missing (fixes nil error)
+                        local n = (data.displayName or data.name) or key
+                        if n and n ~= "" then
+                             DA_UseItemByName(n)
+                        end
+                     end
+                 end)
+             else
+                 f:SetScript("OnClick", nil)
+             end
+
+             if showTooltips then
+                 f:SetScript("OnEnter", function()
+                     local n = (data.displayName or data.name) or key
+                     DA_ShowDetailedItemTooltip(this, n)
+                 end)
+                 f:SetScript("OnLeave", function()
+                     GameTooltip:Hide()
+                 end)
+             else
+                 f:SetScript("OnEnter", nil)
+                 f:SetScript("OnLeave", nil)
+             end
         elseif data and data.type == "Item" then
-             -- If not clickable (or editing), ensure mouse is disabled (unless editing logic enabled it)
-             -- Check type=="Item" to avoid messing with abilities/auras which might have their own logic (though they usually don't click).
+
+             -- Even during edit, clear tooltip scripts so they can't “stick”.
+             f:SetScript("OnEnter", nil)
+             f:SetScript("OnLeave", nil)
              if not _G["DoiteEdit_CurrentKey"] then
-                 f:EnableMouse(false)
+                f:EnableMouse(false)
                  f:SetScript("OnClick", nil)
              end
         end

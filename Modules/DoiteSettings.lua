@@ -91,17 +91,17 @@ local function DS_CreateSettingsFrame()
 	
 	-- Coming soon text (center body)
     local coming = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    coming:SetPoint("TOPLEFT", f, "TOPLEFT", 20, -75)
+    coming:SetPoint("TOPLEFT", f, "TOPLEFT", 20, -100)
     coming:SetWidth(210)
     coming:SetJustifyH("LEFT")
     coming:SetJustifyV("TOP")
-    coming:SetText("Settings coming:\n\n* Padding for icons (screen)\n* Soon of CD (Range for sliders & Time)\n* Refresh rate for certain rebuilds (like group)")
+    coming:SetText("Settings coming:\n\n* Soon of CD (Range for sliders & Time)\n* Refresh rate for certain rebuilds (like group)")
 
     ---------------------------------------------------------------
     -- pfUI border toggle
     ---------------------------------------------------------------
     local pfuiBorderBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    pfuiBorderBtn:SetWidth(100)
+    pfuiBorderBtn:SetWidth(120)
     pfuiBorderBtn:SetHeight(20)
     pfuiBorderBtn:SetPoint("TOPLEFT", f, "TOPLEFT", 20, -50)
 
@@ -170,10 +170,55 @@ local function DS_CreateSettingsFrame()
 
     DS_UpdatePfUIButton()
 
+    ---------------------------------------------------------------
+    -- Item tooltip toggle
+    ---------------------------------------------------------------
+    local itemTooltipBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    itemTooltipBtn:SetWidth(120)
+    itemTooltipBtn:SetHeight(20)
+    itemTooltipBtn:SetPoint("TOPLEFT", pfuiBorderBtn, "BOTTOMLEFT", 0, -5)
+
+    local function DS_UpdateItemTooltipButton()
+        if not DoiteAurasDB then DoiteAurasDB = {} end
+
+        -- Default ON if unset
+        if DoiteAurasDB.showtooltip == nil then
+            DoiteAurasDB.showtooltip = true
+        end
+
+        if DoiteAurasDB.showtooltip == true then
+            itemTooltipBtn:SetText("Item tooltip: ON")
+        else
+            itemTooltipBtn:SetText("Item tooltip: OFF")
+        end
+
+        -- Always enabled, match pfUI button "enabled" color
+        if itemTooltipBtn.Enable then itemTooltipBtn:Enable() end
+        local fs = itemTooltipBtn.GetFontString and itemTooltipBtn:GetFontString()
+        if fs and fs.SetTextColor then
+            fs:SetTextColor(1, 0.82, 0)
+        end
+    end
+
+    itemTooltipBtn:SetScript("OnClick", function()
+        if not DoiteAurasDB then DoiteAurasDB = {} end
+        DoiteAurasDB.showtooltip = not (DoiteAurasDB.showtooltip == true)
+        DS_UpdateItemTooltipButton()
+
+        -- Refresh so mouse handlers/tooltip scripts are updated immediately
+        if DoiteAuras_RefreshIcons then
+            pcall(DoiteAuras_RefreshIcons)
+        end
+    end)
+
+    DS_UpdateItemTooltipButton()
+
     -- OnShow: enforce exclusivity + top-most
     f:SetScript("OnShow", function()
         DS_CloseOtherWindows()
         DS_MakeTopMost(f)
+        DS_UpdatePfUIButton()
+        DS_UpdateItemTooltipButton()
     end)
 
     DS_MakeTopMost(f)
