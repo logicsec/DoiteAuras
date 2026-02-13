@@ -1315,7 +1315,23 @@ local function _EvaluateItemCoreState(data, c)
   -- 1) Synthetic inventory-slot entries (equipped trinkets / weapons)
   -- --------------------------------------------------------------------
   if invSlotName and invSlotName ~= "" then
-    local mode = c.mode or ""
+    -- Derive mode from dual booleans (with legacy c.mode fallback)
+    local _isOncd  = (c.oncd == true)
+    local _isNotcd = (c.notcd == true)
+    if not _isOncd and not _isNotcd then
+      if c.mode == "oncd"  then _isOncd = true end
+      if c.mode == "notcd" then _isNotcd = true end
+    end
+    local mode
+    if _isOncd and _isNotcd then
+      mode = "both"
+    elseif _isOncd then
+      mode = "oncd"
+    elseif _isNotcd then
+      mode = "notcd"
+    else
+      mode = ""
+    end
     local key = data and data.key
 
     -- Direct 1:1 slot bindings (TRINKET1 / TRINKET2 / MAINHAND / OFFHAND / RANGED)
@@ -1330,7 +1346,9 @@ local function _EvaluateItemCoreState(data, c)
       state.rem = rem
       state.dur = dur
 
-      if mode == "oncd" then
+      if mode == "both" then
+        state.modeMatches = hasItem
+      elseif mode == "oncd" then
         state.modeMatches = (hasItem and onCd)
       elseif mode == "notcd" then
         state.modeMatches = (hasItem and (not onCd))
@@ -1353,7 +1371,7 @@ local function _EvaluateItemCoreState(data, c)
           and data.displayName == "---EQUIPPED WEAPON SLOTS---" then
 
         local needTE = false
-        if (mode == "notcd"
+        if ((mode == "notcd" or mode == "both")
               and (c.textTimeRemaining == true or c.remainingEnabled == true or c.enchant ~= nil))
             or (c.textStackCounter == true)
             or (c.stacksEnabled == true) then
@@ -1539,7 +1557,24 @@ local function _EvaluateItemCoreState(data, c)
             or nil
         local winner = prevSlot
 
-        if mode == "notcd" then
+        if mode == "both" then
+          -- Both modes: always pass if any usable trinket exists
+          state.modeMatches = (use1 or use2)
+          if use1 then
+            winner = INV_SLOT_TRINKET1
+            state.rem = rem1
+            state.dur = dur1
+          elseif use2 then
+            winner = INV_SLOT_TRINKET2
+            state.rem = rem2
+            state.dur = dur2
+          end
+          if key and winner then
+            _TrinketFirstMemory[key] = _TrinketFirstMemory[key] or {}
+            _TrinketFirstMemory[key].slot = winner
+          end
+
+        elseif mode == "notcd" then
           -- A slot is “ready” if it is a usable trinket and not on cooldown.
           local function slotReady(useFlag, onCdFlag)
             return useFlag and (not onCdFlag)
@@ -1623,7 +1658,14 @@ local function _EvaluateItemCoreState(data, c)
 
       else
         -- TRINKET_BOTH: Require all equipped use-trinkets to be in the requested state.
-        if mode == "oncd" then
+        if mode == "both" then
+          -- Both modes: always pass if any usable trinket exists
+          state.modeMatches = (use1 or use2)
+          local r1 = (use1 and rem1) or 0
+          local r2 = (use2 and rem2) or 0
+          state.rem = (r1 > r2) and r1 or r2
+          state.dur = dur1 or dur2
+        elseif mode == "oncd" then
           local ok = true
           if use1 and not on1 then
             ok = false
@@ -1792,8 +1834,27 @@ local function _EvaluateItemCoreState(data, c)
     state.rem = rem
     state.dur = dur
 
-    local mode = c.mode or ""
-    if mode == "oncd" then
+    -- Derive mode from dual booleans (with legacy c.mode fallback)
+    local _isOncd  = (c.oncd == true)
+    local _isNotcd = (c.notcd == true)
+    if not _isOncd and not _isNotcd then
+      if c.mode == "oncd"  then _isOncd = true end
+      if c.mode == "notcd" then _isNotcd = true end
+    end
+    local mode
+    if _isOncd and _isNotcd then
+      mode = "both"
+    elseif _isOncd then
+      mode = "oncd"
+    elseif _isNotcd then
+      mode = "notcd"
+    else
+      mode = ""
+    end
+
+    if mode == "both" then
+      state.modeMatches = hasItem
+    elseif mode == "oncd" then
       state.modeMatches = (hasItem and onCd)
     elseif mode == "notcd" then
       state.modeMatches = (hasItem and (not onCd))
@@ -1807,8 +1868,7 @@ local function _EvaluateItemCoreState(data, c)
       state.rem = 0
       state.dur = 0
     else
-      local mode = c.mode or ""
-      if mode == "oncd" or mode == "notcd" then
+      if mode == "oncd" or mode == "notcd" or mode == "both" then
         state.modeMatches = false
       end
     end
@@ -4308,7 +4368,7 @@ local function _IconHasTimeLogic_Item(data)
   end
   local c = data.conditions.item
 
-  if c.mode == "oncd" or c.mode == "notcd" then
+  if c.mode == "oncd" or c.mode == "notcd" or c.oncd == true or c.notcd == true then
     return true
   end
 
@@ -5339,7 +5399,7 @@ local function CheckItemConditions(data)
     local threshold = tonumber(c.remainingVal)
     if threshold then
       -- Equipped weapon slots + notcd: use temp enchant remaining (seconds)
-      if (c.mode == "notcd")
+      if (c.mode == "notcd" or c.notcd == true)
           and (data.displayName == "---EQUIPPED WEAPON SLOTS---")
           and (c.inventorySlot == "MAINHAND" or c.inventorySlot == "OFFHAND" or c.inventorySlot == "RANGED") then
 
@@ -6059,7 +6119,7 @@ local function _Doite_UpdateOverlayForFrame(frame, key, dataTbl, slideActive)
         itemState = _EvaluateItemCoreState(dataTbl, ci)
 
         -- Special case: equipped weapon slots + mode=notcd => show temp enchant remaining time
-        if (ci.mode == "notcd")
+        if (ci.mode == "notcd" or ci.notcd == true)
             and (dataTbl.displayName == "---EQUIPPED WEAPON SLOTS---")
             and (ci.inventorySlot == "MAINHAND" or ci.inventorySlot == "OFFHAND" or ci.inventorySlot == "RANGED") then
 
