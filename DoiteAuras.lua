@@ -15,6 +15,9 @@ DoiteAurasDB.groupSort       = DoiteAurasDB.groupSort       or {}
 DoiteAurasDB.bucketDisabled  = DoiteAurasDB.bucketDisabled  or {}
 DoiteAurasDB.bucketCollapsed = DoiteAurasDB.bucketCollapsed or {}
 DoiteAurasDB.pfuiBorder      = DoiteAurasDB.pfuiBorder
+if DoiteAurasDB.showtooltip == nil then
+  DoiteAurasDB.showtooltip = true
+end
 DoiteAuras = DoiteAuras or {}
 
 -- Always return a valid name->texture cache table
@@ -2607,7 +2610,15 @@ local function RefreshIcons()
         -- STRICTLY restrict to Items only
         local isClickable = (data and data.type == "Item" and ic and ic.clickable and (not f._daDragging) and (not _G["DoiteEdit_CurrentKey"]))
         -- Always show tooltips for items when not in edit mode
-        local showTooltips = (data and data.type == "Item" and (not f._daDragging) and (not _G["DoiteEdit_CurrentKey"]))
+        -- Show tooltips for items only when enabled in DB and not in edit mode
+		local showTooltips = (data and data.type == "Item"
+			and (DoiteAurasDB and DoiteAurasDB.showtooltip == true)
+			and (not f._daDragging)
+			and (not _G["DoiteEdit_CurrentKey"]))
+
+        if _G["DoiteEdit_CurrentKey"] then
+            showTooltips = false
+        end
 
         if isClickable or showTooltips then
              f:EnableMouse(true)
@@ -2641,12 +2652,13 @@ local function RefreshIcons()
                  f:SetScript("OnLeave", nil)
              end
         elseif data and data.type == "Item" then
-             -- If not clickable/tooltippable (or editing), ensure mouse is disabled
+
+             -- Even during edit, clear tooltip scripts so they can't “stick”.
+             f:SetScript("OnEnter", nil)
+             f:SetScript("OnLeave", nil)
              if not _G["DoiteEdit_CurrentKey"] then
-                 f:EnableMouse(false)
+                f:EnableMouse(false)
                  f:SetScript("OnClick", nil)
-                 f:SetScript("OnEnter", nil)
-                 f:SetScript("OnLeave", nil)
              end
         end
 

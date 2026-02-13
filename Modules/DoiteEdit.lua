@@ -503,9 +503,11 @@ end
 
 -- === Dynamic bounds for Position & Size sliders (based on UIParent) ===
 local function _DA_GetParentDims()
-  local w = (UIParent and UIParent.GetWidth and UIParent:GetWidth()) or (GetScreenWidth and GetScreenWidth()) or 1024
-  local h = (UIParent and UIParent.GetHeight and UIParent:GetHeight()) or (GetScreenHeight and GetScreenHeight()) or 768
-  return w, h
+  local uw, uh = UIParent:GetWidth(), UIParent:GetHeight()
+  local sw, sh = GetScreenWidth(), GetScreenHeight()
+  if sw > uw then uw = sw end
+  if sh > uh then uh = sh end
+  return uw, uh
 end
 
 --  X/Y are offsets from CENTER, so bounds are roughly +/- half the parent size (with a tiny padding)
