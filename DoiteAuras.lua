@@ -7,6 +7,8 @@
 
 if DoiteAurasFrame then return end
 
+_G["DoiteAuras_RenamingGroup"] = nil
+
 StaticPopupDialogs["DOITE_RENAME_GROUP"] = {
   text = "Enter alias for %s:",
   button1 = "Set",
@@ -14,14 +16,19 @@ StaticPopupDialogs["DOITE_RENAME_GROUP"] = {
   hasEditBox = 1,
   maxLetters = 20,
   OnShow = function()
-    local groupName = this.data
-    local currentAlias = DoiteAurasDB.groupAlias and DoiteAurasDB.groupAlias[groupName] or ""
-    _G[this:GetName().."EditBox"]:SetText(currentAlias)
-    _G[this:GetName().."EditBox"]:SetFocus()
+    local groupName = _G["DoiteAuras_RenamingGroup"]
+    local currentAlias = (groupName and DoiteAurasDB.groupAlias and DoiteAurasDB.groupAlias[groupName]) or ""
+    local eb = _G[this:GetName().."EditBox"] or _G[(this:GetParent()):GetName().."EditBox"]
+    if eb then
+      eb:SetText(currentAlias)
+      eb:SetFocus()
+    end
   end,
   OnAccept = function()
-    local text = _G[this:GetParent():GetName().."EditBox"]:GetText()
-    local groupName = this:GetParent().data 
+    local eb = _G[this:GetName().."EditBox"] or _G[(this:GetParent()):GetName().."EditBox"]
+    local text = eb and eb:GetText() or nil
+    local groupName = _G["DoiteAuras_RenamingGroup"]
+    if not groupName then return end
     
     DoiteAurasDB.groupAlias = DoiteAurasDB.groupAlias or {}
     if text and text ~= "" then
@@ -30,7 +37,11 @@ StaticPopupDialogs["DOITE_RENAME_GROUP"] = {
         DoiteAurasDB.groupAlias[groupName] = nil
     end
     
+    _G["DoiteAuras_RenamingGroup"] = nil
     if DoiteAuras_RefreshList then DoiteAuras_RefreshList() end
+  end,
+  OnCancel = function()
+    _G["DoiteAuras_RenamingGroup"] = nil
   end,
   timeout = 0,
   whileDead = 1,
@@ -2843,12 +2854,10 @@ local function RefreshList()
                 -- NEW: Edit Button (Left of Group Name)
                 hdr.renameBtn = CreateFrame("Button", nil, hdr)
                 hdr.renameBtn:SetWidth(12); hdr.renameBtn:SetHeight(12)
-                hdr.renameBtn:SetPoint("LEFT", hdr.expandBut, "RIGHT", 2, 0)
+                hdr.renameBtn:SetPoint("LEFT", hdr.toggleBtn, "RIGHT", 2, 0)
                 
-                local tex = hdr.renameBtn:CreateTexture(nil, "ARTWORK")
-                tex:SetAllPoints()
-                tex:SetTexture("Interface\\Buttons\\UI-OptionsButton")
-                hdr.renameBtn:SetNormalTexture(tex)
+                hdr.renameBtn:SetNormalTexture("Interface\\Buttons\\UI-GuildButton-OfficerNote-Up")
+                hdr.renameBtn:SetPushedTexture("Interface\\Buttons\\UI-GuildButton-OfficerNote-Down")
                 
                 local hi = hdr.renameBtn:CreateTexture(nil, "HIGHLIGHT")
                 hi:SetAllPoints()
@@ -2859,6 +2868,7 @@ local function RefreshList()
                 hdr.renameBtn:SetScript("OnClick", function()
                     local p = this:GetParent()
                     if not p or not p.groupName then return end
+                    _G["DoiteAuras_RenamingGroup"] = p.groupName
                     StaticPopup_Show("DOITE_RENAME_GROUP", p.groupName)
                 end)
 
