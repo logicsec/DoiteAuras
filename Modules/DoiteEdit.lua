@@ -8510,12 +8510,24 @@ local ic = c.item or {}
 	condFrame._item_qty_sep_default = condFrame._item_qty_sep_default or "QUANTITY"
 
 	-- mode is needed HERE (this block runs before the later mode-local)
-	local _qtyMode = ic.mode or "notcd"
-	if _qtyMode ~= "notcd" and _qtyMode ~= "oncd" then
+	-- Derive from dual booleans (ic.mode is nil after migration)
+	local _isOncdQ  = (ic.oncd == true)
+	local _isNotcdQ = (ic.notcd == true)
+	if not _isOncdQ and not _isNotcdQ then
+	  _isNotcdQ = true
+	end
+	local _qtyMode
+	if _isOncdQ and _isNotcdQ then
+	  _qtyMode = "both"
+	elseif _isOncdQ then
+	  _qtyMode = "oncd"
+	elseif _isNotcdQ then
+	  _qtyMode = "notcd"
+	else
 	  _qtyMode = "notcd"
 	end
 
-	local useStacks = (isWeaponSlots and (_qtyMode == "notcd")) and true or false
+	local useStacks = (isWeaponSlots and (_qtyMode == "notcd" or _qtyMode == "both")) and true or false
 
 	if useStacks then
 	  if condFrame.cond_item_stacks_cb and condFrame.cond_item_stacks_cb.text and condFrame.cond_item_stacks_cb.text.SetText then
@@ -8724,7 +8736,7 @@ local ic = c.item or {}
     if condFrame.cond_item_enchant then
       condFrame.cond_item_enchant:Show()
 
-      local allowEnchant = (not isMissing) and isWeaponSlots and (mode == "notcd")
+      local allowEnchant = (not isMissing) and isWeaponSlots and (mode == "notcd" or mode == "both")
       if allowEnchant then
         _enCheck(condFrame.cond_item_enchant)
 
@@ -8772,7 +8784,7 @@ local ic = c.item or {}
     if condFrame.cond_item_text_enchant then
       condFrame.cond_item_text_enchant:Show()
 
-      local allowEnchantText = (not isMissing) and isWeaponSlots and (mode == "notcd")
+      local allowEnchantText = (not isMissing) and isWeaponSlots and (mode == "notcd" or mode == "both")
 
       -- extra rule: "Not enchanted" disables this checkbox and clears its DB entry
       if allowEnchantText and (ic.enchant == false) then
@@ -9053,7 +9065,7 @@ local ic = c.item or {}
     do
       local sepTitle = "REMAINING TIME"
       if isWeaponSlots then
-        if mode == "notcd" then
+        if mode == "notcd" or mode == "both" then
           sepTitle = "REMAINING TIME (TEMPORARY WEAPON ENCHANT)"
         elseif mode == "oncd" then
           sepTitle = "REMAINING TIME"
