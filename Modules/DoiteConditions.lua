@@ -5390,7 +5390,8 @@ local function CheckItemConditions(data)
   -- --------------------------------------------------------------------
   -- 9. Remaining (item cooldown time left)
   --     Editor only allows this when mode == "oncd" and not whereMissing.
-  --     Special-case: equipped weapon slots + mode=notcd => compare against temp enchant remaining.
+  --     Special-case: equipped weapon slots => prefer temp enchant remaining,
+  --     then fall through to item use-effect CD remaining.
   -- --------------------------------------------------------------------
   if show and c.remainingEnabled
       and c.remainingComp and c.remainingComp ~= ""
@@ -5398,18 +5399,24 @@ local function CheckItemConditions(data)
 
     local threshold = tonumber(c.remainingVal)
     if threshold then
-      -- Equipped weapon slots + notcd: use temp enchant remaining (seconds)
-      if (c.mode == "notcd" or c.notcd == true)
+      -- Equipped weapon slots: prefer temp enchant remaining, fall through to item CD
+      if (c.mode == "notcd" or c.mode == "oncd" or c.notcd == true or c.oncd == true)
           and (data.displayName == "---EQUIPPED WEAPON SLOTS---")
           and (c.inventorySlot == "MAINHAND" or c.inventorySlot == "OFFHAND" or c.inventorySlot == "RANGED") then
 
-        -- If there is NO temp enchant, ALWAYS hide (do not treat nil as 0).
-        if (not state) or (not state.teRem) or state.teRem <= 0 then
-          show = false
-        else
+        if state and state.teRem and state.teRem > 0 then
+          -- Temp enchant is active: evaluate against its remaining time
           if not _RemainingPasses(state.teRem, c.remainingComp, threshold) then
             show = false
           end
+        elseif state and state.rem and state.rem > 0 then
+          -- No temp enchant, but item has a use-effect CD: evaluate against item CD
+          if not _RemainingPasses(state.rem, c.remainingComp, threshold) then
+            show = false
+          end
+        else
+          -- Neither temp enchant nor item CD active: hide
+          show = false
         end
 
       else
@@ -6118,16 +6125,26 @@ local function _Doite_UpdateOverlayForFrame(frame, key, dataTbl, slideActive)
         -- Reuse this later for stack counter too
         itemState = _EvaluateItemCoreState(dataTbl, ci)
 
-        -- Special case: equipped weapon slots + mode=notcd => show temp enchant remaining time
-        if (ci.mode == "notcd" or ci.notcd == true)
+        -- Equipped weapon slots: prefer temp enchant remaining, fall through to item use-effect CD
+        if (ci.mode == "notcd" or ci.mode == "oncd" or ci.notcd == true or ci.oncd == true)
             and (dataTbl.displayName == "---EQUIPPED WEAPON SLOTS---")
             and (ci.inventorySlot == "MAINHAND" or ci.inventorySlot == "OFFHAND" or ci.inventorySlot == "RANGED") then
 
           local remTE = itemState and itemState.teRem or 0
           if remTE and remTE > 0 then
+            -- Temp enchant active: show enchant remaining
             remText = _FmtRem(remTE)
             wantRem = (remText ~= nil)
             frame._daSortRem = remTE
+          else
+            -- No temp enchant: fall through to item use-effect CD remaining
+            local remItem = itemState and itemState.rem or nil
+            local durItem = itemState and itemState.dur or 0
+            if remItem and remItem > 0 and durItem and durItem > 1.5 then
+              remText = _FmtRem(remItem)
+              wantRem = (remText ~= nil)
+              frame._daSortRem = remItem
+            end
           end
 
         else
