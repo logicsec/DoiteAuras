@@ -503,11 +503,9 @@ end
 
 -- === Dynamic bounds for Position & Size sliders (based on UIParent) ===
 local function _DA_GetParentDims()
-  local uw, uh = UIParent:GetWidth(), UIParent:GetHeight()
-  local sw, sh = GetScreenWidth(), GetScreenHeight()
-  if sw > uw then uw = sw end
-  if sh > uh then uh = sh end
-  return uw, uh
+  local w = (UIParent and UIParent.GetWidth and UIParent:GetWidth()) or (GetScreenWidth and GetScreenWidth()) or 1024
+  local h = (UIParent and UIParent.GetHeight and UIParent:GetHeight()) or (GetScreenHeight and GetScreenHeight()) or 768
+  return w, h
 end
 
 --  X/Y are offsets from CENTER, so bounds are roughly +/- half the parent size (with a tiny padding)
@@ -1003,7 +1001,26 @@ local function SetExclusiveItemMode(mode)
   local d = EnsureDBEntry(currentKey)
   d.conditions = d.conditions or {}
   d.conditions.item = d.conditions.item or {}
-  d.conditions.item.mode = mode
+  local ic = d.conditions.item
+
+  -- Migrate legacy mode to booleans if they don't exist yet
+  if ic.mode then
+    if ic.mode == "notcd" then ic.notcd = true end
+    if ic.mode == "oncd" then ic.oncd = true end
+  end
+
+  if mode == "notcd" then
+    ic.notcd = true
+    ic.mode = nil
+  elseif mode == "oncd" then
+    ic.oncd = true
+    ic.mode = nil
+  elseif mode == "clear_notcd" then
+    ic.notcd = nil
+  elseif mode == "clear_oncd" then
+    ic.oncd = nil
+  end
+
   UpdateCondFrameForKey(currentKey)
   SafeRefresh()
   SafeEvaluate()
@@ -2667,20 +2684,16 @@ local function CreateConditionsUI()
     end
   end)
 
-  -- Item Usability & Cooldown (NotCD / OnCD only, exclusive)
+  -- Item Usability & Cooldown (NotCD / OnCD — independent, both may be checked)
   condFrame.cond_item_notcd:SetScript("OnClick", function()
     if not currentKey then
       this:SetChecked(false)
       return
     end
     if this:GetChecked() then
-      condFrame.cond_item_oncd:SetChecked(false)
       SetExclusiveItemMode("notcd")
     else
-      -- enforce at least one checked (between notcd/oncd only)
-      if not condFrame.cond_item_oncd:GetChecked() then
-        this:SetChecked(true)
-      end
+      SetExclusiveItemMode("clear_notcd")
     end
   end)
 
@@ -2690,13 +2703,9 @@ local function CreateConditionsUI()
       return
     end
     if this:GetChecked() then
-      condFrame.cond_item_notcd:SetChecked(false)
       SetExclusiveItemMode("oncd")
     else
-      -- enforce at least one checked (between notcd/oncd only)
-      if not condFrame.cond_item_notcd:GetChecked() then
-        this:SetChecked(true)
-      end
+      SetExclusiveItemMode("clear_oncd")
     end
   end)
   
@@ -8501,12 +8510,24 @@ local ic = c.item or {}
 	condFrame._item_qty_sep_default = condFrame._item_qty_sep_default or "QUANTITY"
 
 	-- mode is needed HERE (this block runs before the later mode-local)
-	local _qtyMode = ic.mode or "notcd"
-	if _qtyMode ~= "notcd" and _qtyMode ~= "oncd" then
+	-- Derive from dual booleans (ic.mode is nil after migration)
+	local _isOncdQ  = (ic.oncd == true)
+	local _isNotcdQ = (ic.notcd == true)
+	if not _isOncdQ and not _isNotcdQ then
+	  _isNotcdQ = true
+	end
+	local _qtyMode
+	if _isOncdQ and _isNotcdQ then
+	  _qtyMode = "both"
+	elseif _isOncdQ then
+	  _qtyMode = "oncd"
+	elseif _isNotcdQ then
+	  _qtyMode = "notcd"
+	else
 	  _qtyMode = "notcd"
 	end
 
-	local useStacks = (isWeaponSlots and (_qtyMode == "notcd")) and true or false
+	local useStacks = (isWeaponSlots and (_qtyMode == "notcd" or _qtyMode == "both")) and true or false
 
 	if useStacks then
 	  if condFrame.cond_item_stacks_cb and condFrame.cond_item_stacks_cb.text and condFrame.cond_item_stacks_cb.text.SetText then
@@ -8688,19 +8709,34 @@ local ic = c.item or {}
     end
 
     -- mode (must be defined BEFORE any mode-based UI logic)
-    local mode = ic.mode or "notcd"
-    if mode ~= "notcd" and mode ~= "oncd" then
+    -- Dual-boolean model: ic.oncd / ic.notcd (with legacy ic.mode fallback)
+    local isOncd  = (ic.oncd == true)
+    local isNotcd = (ic.notcd == true)
+    if not isOncd and not isNotcd and ic.mode then
+      if ic.mode == "oncd"  then isOncd = true end
+      if ic.mode == "notcd" then isNotcd = true end
+    end
+    -- Derive a single "mode" string for downstream UI gating that still uses it
+    local mode
+    if isOncd and isNotcd then
+      mode = "both"
+    elseif isOncd then
+      mode = "oncd"
+    elseif isNotcd then
       mode = "notcd"
+    else
+      mode = "notcd"
+      isNotcd = true
     end
 
-    condFrame.cond_item_notcd:SetChecked(mode == "notcd")
-    condFrame.cond_item_oncd:SetChecked(mode == "oncd")
+    condFrame.cond_item_notcd:SetChecked(isNotcd)
+    condFrame.cond_item_oncd:SetChecked(isOncd)
 
     -- Enchanted state dropdown: Enabled ONLY for weapon slots + notcd + not missing. Disabled elsewhere, and clears ic.enchant when disabled.
     if condFrame.cond_item_enchant then
       condFrame.cond_item_enchant:Show()
 
-      local allowEnchant = (not isMissing) and isWeaponSlots and (mode == "notcd")
+      local allowEnchant = (not isMissing) and isWeaponSlots and (mode == "notcd" or mode == "both")
       if allowEnchant then
         _enCheck(condFrame.cond_item_enchant)
 
@@ -8748,7 +8784,7 @@ local ic = c.item or {}
     if condFrame.cond_item_text_enchant then
       condFrame.cond_item_text_enchant:Show()
 
-      local allowEnchantText = (not isMissing) and isWeaponSlots and (mode == "notcd")
+      local allowEnchantText = (not isMissing) and isWeaponSlots and (mode == "notcd" or mode == "both")
 
       -- extra rule: "Not enchanted" disables this checkbox and clears its DB entry
       if allowEnchantText and (ic.enchant == false) then
@@ -8882,7 +8918,7 @@ local ic = c.item or {}
     -- Icon text: Time remaining (shared DB key: ic.textTimeRemaining)
 
     do
-      local allowTime = (not isMissing) and (mode == "oncd")
+      local allowTime = (not isMissing) and (mode == "oncd" or mode == "both")
 
       if allowTime then
         _enCheck(condFrame.cond_item_text_time)
@@ -9029,7 +9065,7 @@ local ic = c.item or {}
     do
       local sepTitle = "REMAINING TIME"
       if isWeaponSlots then
-        if mode == "notcd" then
+        if mode == "notcd" or mode == "both" then
           sepTitle = "REMAINING TIME (TEMPORARY WEAPON ENCHANT)"
         elseif mode == "oncd" then
           sepTitle = "REMAINING TIME"
@@ -9038,7 +9074,7 @@ local ic = c.item or {}
       SetSeparator("item", 12, sepTitle, true, true)
     end
     condFrame.cond_item_remaining_cb:Show()
-	if (not isMissing) and (mode == "oncd" or (isWeaponSlots and mode == "notcd")) then
+	if (not isMissing) and (mode == "oncd" or mode == "both" or (isWeaponSlots and mode == "notcd")) then
 	  _enCheck(condFrame.cond_item_remaining_cb)
 	  local remOn = (ic.remainingEnabled == true)
 	  condFrame.cond_item_remaining_cb:SetChecked(remOn)
