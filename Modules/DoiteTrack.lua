@@ -1883,15 +1883,10 @@ function DoiteTrack:_OnAuraNPEvent()
     return
   end
 
-local pGuid = _GetPlayerGUID()
-if not pGuid or not casterGuid or casterGuid == "" then
-  return
-end
-
-if casterGuid ~= pGuid then
-  return
-end
-
+  local pGuid = _GetPlayerGUID()
+  if not pGuid or not casterGuid or casterGuid == "" or casterGuid ~= pGuid then
+    return
+  end
 
   -- Derive name from spellId
   local spellName, spellRank = _GetSpellNameRank(spellId)
