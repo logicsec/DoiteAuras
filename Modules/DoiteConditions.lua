@@ -25,13 +25,7 @@ local UnitIsFriend = UnitIsFriend
 local UnitCanAttack = UnitCanAttack
 local UnitIsUnit = UnitIsUnit
 local UnitClass = UnitClass
-local UnitName = UnitName
-local UnitHealth = UnitHealth
-local UnitHealthMax = UnitHealthMax
 local UnitMana = UnitMana
-local UnitManaMax = UnitManaMax
-local GetComboPoints = GetComboPoints
-local GetNumTalentTabs = GetNumTalentTabs
 local GetNumTalents = GetNumTalents
 local GetTalentInfo = GetTalentInfo
 local _GetAuraStacksOnUnit
