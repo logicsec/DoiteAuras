@@ -40,7 +40,6 @@ local _StacksPasses
 local str_find = string.find
 local str_gsub = string.gsub
 local SpellUsableArgCache = {}
-
 -- Nampower Returns: name, texturePath (either may be nil)
 local function _NP_SpellNameAndTexture(spellId)
   if not spellId or spellId <= 0 then
@@ -4840,15 +4839,18 @@ local function CheckAbilityConditions(data)
   local spellIndex = _GetSpellIndexByName(spellName)
   local bookType = BOOKTYPE_SPELL
   local foundInBook = (spellIndex ~= nil)
+  local onCdNow = false
 
   if not foundInBook then
     return false
   end
 
+  onCdNow = _IsSpellOnCooldown(spellIndex, bookType) and true or false
+
   if c.mode == "usable" and spellIndex then
     local _, cls = UnitClass("player");
     cls = cls and string.upper(cls) or ""
-    local onCooldown = _IsSpellOnCooldown(spellIndex, bookType)
+    local onCooldown = onCdNow
 
     -- === WARRIOR override for Overpower/Revenge ===
     if cls == "WARRIOR" and (spellName == "Overpower" or spellName == "Revenge") then
@@ -4928,13 +4930,33 @@ local function CheckAbilityConditions(data)
 
 
   elseif c.mode == "notcd" and spellIndex then
-    if _IsSpellOnCooldown(spellIndex, bookType) then
+    if onCdNow then
       show = false
     end
 
   elseif c.mode == "oncd" and spellIndex then
-    if not _IsSpellOnCooldown(spellIndex, bookType) then
+    if not onCdNow then
       show = false
+    end
+  end
+
+  if data and data.key then
+    DoiteConditions._soundEdge = DoiteConditions._soundEdge or {}
+    DoiteConditions._soundEdge[data.key] = DoiteConditions._soundEdge[data.key] or {}
+
+    local es = DoiteConditions._soundEdge[data.key]
+    local prevOn = es.abilityOnCd
+    local prevOff = es.abilityOffCd
+    es.abilityOnCd = onCdNow and true or false
+    es.abilityOffCd = (not onCdNow) and true or false
+
+    if prevOn ~= nil and (not prevOn) and es.abilityOnCd and c.soundOnCDEnabled == true
+        and c.soundOnCD and c.soundOnCD ~= "" and PlaySoundFile then
+      pcall(PlaySoundFile, "Interface\\AddOns\\DoiteAuras\\Sounds\\" .. c.soundOnCD)
+    end
+    if prevOff ~= nil and (not prevOff) and es.abilityOffCd and c.soundOffCDEnabled == true
+        and c.soundOffCD and c.soundOffCD ~= "" and PlaySoundFile then
+      pcall(PlaySoundFile, "Interface\\AddOns\\DoiteAuras\\Sounds\\" .. c.soundOffCD)
     end
   end
 
@@ -5203,6 +5225,7 @@ local function CheckItemConditions(data)
   -- 1. Core item state (Whereabouts / inventorySlot + mode / cooldown)
   -- --------------------------------------------------------------------
   local state = _EvaluateItemCoreState(data, c)
+  local itemOnCdNow = (state and state.hasItem and state.rem and state.rem > 0) and true or false
 
   -- Whereabouts / inventorySlot gating
   if not state.passesWhere then
@@ -5216,6 +5239,26 @@ local function CheckItemConditions(data)
     local glow = c.glow and true or false
     local grey = c.greyscale and true or false
     return false, glow, grey
+  end
+
+  if data and data.key then
+    DoiteConditions._soundEdge = DoiteConditions._soundEdge or {}
+    DoiteConditions._soundEdge[data.key] = DoiteConditions._soundEdge[data.key] or {}
+
+    local es = DoiteConditions._soundEdge[data.key]
+    local prevOn = es.itemOnCd
+    local prevOff = es.itemOffCd
+    es.itemOnCd = itemOnCdNow and true or false
+    es.itemOffCd = (not itemOnCdNow) and true or false
+
+    if prevOn ~= nil and (not prevOn) and es.itemOnCd and c.soundOnCDEnabled == true
+        and c.soundOnCD and c.soundOnCD ~= "" and PlaySoundFile then
+      pcall(PlaySoundFile, "Interface\\AddOns\\DoiteAuras\\Sounds\\" .. c.soundOnCD)
+    end
+    if prevOff ~= nil and (not prevOff) and es.itemOffCd and c.soundOffCDEnabled == true
+        and c.soundOffCD and c.soundOffCD ~= "" and PlaySoundFile then
+      pcall(PlaySoundFile, "Interface\\AddOns\\DoiteAuras\\Sounds\\" .. c.soundOffCD)
+    end
   end
 
   -- --------------------------------------------------------------------
@@ -5673,6 +5716,26 @@ local function CheckAuraConditions(data)
   else
     -- default and "found"
     show = found
+  end
+
+  if data and data.key then
+    DoiteConditions._soundEdge = DoiteConditions._soundEdge or {}
+    DoiteConditions._soundEdge[data.key] = DoiteConditions._soundEdge[data.key] or {}
+
+    local es = DoiteConditions._soundEdge[data.key]
+    local prevFound = es.auraFound
+    local prevMissing = es.auraMissing
+    es.auraFound = found and true or false
+    es.auraMissing = (not found) and true or false
+
+    if prevFound ~= nil and (not prevFound) and es.auraFound and c.soundOnGainEnabled == true
+        and c.soundOnGain and c.soundOnGain ~= "" and PlaySoundFile then
+      pcall(PlaySoundFile, "Interface\\AddOns\\DoiteAuras\\Sounds\\" .. c.soundOnGain)
+    end
+    if prevMissing ~= nil and (not prevMissing) and es.auraMissing and c.soundOnFadeEnabled == true
+        and c.soundOnFade and c.soundOnFade ~= "" and PlaySoundFile then
+      pcall(PlaySoundFile, "Interface\\AddOns\\DoiteAuras\\Sounds\\" .. c.soundOnFade)
+    end
   end
 
   -- Combat state
