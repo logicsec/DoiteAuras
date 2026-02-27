@@ -5805,18 +5805,66 @@ local function CheckAuraConditions(data)
     show = false
   end
 
-  _DoiteHandleEdgeSound(
-      data.key,
-      "auraFound",
-      found,
-      (data._daSoundGate and c.soundOnGainEnabled == true),
-      c.soundOnGain)
-  _DoiteHandleEdgeSound(
-      data.key,
-      "auraMissing",
-      (not found),
-      (data._daSoundGate and c.soundOnFadeEnabled == true),
-      c.soundOnFade)
+  do
+    local key = data.key
+    local st = key and _SoundStateByKey[key]
+  
+    local isTargetAura = ((allowHelp or allowHarm) and (not allowSelf)) and true or false
+  
+    local curTargetName = nil
+    if isTargetAura and tf and tf.exists then
+      curTargetName = UnitName("target")
+    end
+  
+    if isTargetAura then
+      if not st then
+        st = {}
+        _SoundStateByKey[key] = st
+      end
+  
+      local prevTargetName = st._daTargetName
+
+    -- If target identity changed, suppress sound edges this evaluation, and seed the edge states to the CURRENT values so we don't get a delayed false edge.
+      if prevTargetName ~= curTargetName then
+        st._daTargetName = curTargetName
+  
+        -- Seed both edge states to current truth (this is what _DoiteHandleEdgeSound would store)
+        st["auraFound"] = found and true or false
+        st["auraMissing"] = (not found) and true or false
+
+        -- Do NOT play sounds on target change.
+      else
+        -- Same target: normal edge sound behavior
+        _DoiteHandleEdgeSound(
+            key,
+            "auraFound",
+            found,
+            (data._daSoundGate and c.soundOnGainEnabled == true),
+            c.soundOnGain)
+        _DoiteHandleEdgeSound(
+            key,
+            "auraMissing",
+            (not found),
+            (data._daSoundGate and c.soundOnFadeEnabled == true),
+            c.soundOnFade)
+      end
+  
+    else
+      -- Self-based aura icons: normal behavior (player aura tracking is stable)
+      _DoiteHandleEdgeSound(
+          key,
+          "auraFound",
+          found,
+          (data._daSoundGate and c.soundOnGainEnabled == true),
+          c.soundOnGain)
+      _DoiteHandleEdgeSound(
+          key,
+          "auraMissing",
+          (not found),
+          (data._daSoundGate and c.soundOnFadeEnabled == true),
+          c.soundOnFade)
+    end
+  end
 
   local vGlow, vGrey = _EvaluateVfxConditions(data)
   local glow = (c.glow or vGlow) and true or false
