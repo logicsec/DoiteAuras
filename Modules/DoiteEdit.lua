@@ -54,13 +54,30 @@ local function DoiteEdit_SetDropdownInteractive(dd, enabled)
   if not dd then
     return
   end
+
   if enabled then
     if UIDropDownMenu_EnableDropDown then
       pcall(UIDropDownMenu_EnableDropDown, dd)
     end
+
+    local name = dd.GetName and dd:GetName()
+    if name then
+      local t = _G[name .. "Text"]
+      if t and t.SetTextColor then
+        t:SetTextColor(1, 1, 1)
+      end
+    end
   else
     if UIDropDownMenu_DisableDropDown then
       pcall(UIDropDownMenu_DisableDropDown, dd)
+    end
+
+    local name = dd.GetName and dd:GetName()
+    if name then
+      local t = _G[name .. "Text"]
+      if t and t.SetTextColor then
+        t:SetTextColor(0.6, 0.6, 0.6)
+      end
     end
   end
 end
@@ -157,6 +174,9 @@ local function DoiteEdit_InitSoundDropdown(dd, typeKey, eventKey, selectedValue)
         UIDropDownMenu_SetSelectedValue(dd, picked)
         UIDropDownMenu_SetText(picked, dd)
         DoiteEdit_SetSoundFromDropdown(typeKey, eventKey, picked)
+        if PlaySoundFile and picked and picked ~= "" then
+          pcall(PlaySoundFile, "Interface\\AddOns\\DoiteAuras\\Sounds\\" .. picked)
+        end
         if CloseDropDownMenus then CloseDropDownMenus() end
       end
       UIDropDownMenu_AddButton(info2, level)
@@ -8935,7 +8955,7 @@ local ic = c.item or {}
       end
 
       if cb.text and cb.text.SetTextColor then
-        cb.text:SetTextColor(0.5, 0.5, 0.5)
+        cb.text:SetTextColor(0.6, 0.6, 0.6)
       end
     end
 
