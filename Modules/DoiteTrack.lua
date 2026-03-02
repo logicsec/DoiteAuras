@@ -2419,6 +2419,57 @@ local function _GetEntryForName(spellName)
   return TrackedByNameNorm[norm]
 end
 
+local function _AuraHasNormName(unit, wantNormName, isDebuff)
+  if not unit or not wantNormName then
+    return false
+  end
+
+  local auras = _GetUnitAuraTable(unit, isDebuff)
+  if type(auras) ~= "table" then
+    return false
+  end
+
+  local n = table.getn(auras)
+  if not n or n <= 0 then
+    return false
+  end
+
+  local i
+  for i = 1, n do
+    local sid = tonumber(auras[i]) or 0
+    if sid > 0 then
+      local n0 = _GetSpellNameRank(sid)
+      local nn = _NormSpellName(n0)
+      if nn and nn == wantNormName then
+        return true
+      end
+    end
+  end
+
+  -- Debuff-overflow safety: when debuff table is full-ish, also inspect buffs.
+  if isDebuff and n >= 16 then
+    local buffs = _GetUnitAuraTable(unit, false)
+    if type(buffs) == "table" then
+      local n2 = table.getn(buffs)
+      if n2 and n2 > 0 then
+        local j
+        for j = 1, n2 do
+          local sid2 = tonumber(buffs[j]) or 0
+          if sid2 > 0 then
+            local n1 = _GetSpellNameRank(sid2)
+            local nn2 = _NormSpellName(n1)
+            if nn2 and nn2 == wantNormName then
+              return true
+            end
+          end
+        end
+      end
+    end
+  end
+
+  return false
+end
+
 function DoiteTrack:GetAuraRemainingSecondsByName(spellName, unit)
   if not spellName or not unit then
     return nil
@@ -2584,6 +2635,15 @@ function DoiteTrack:GetAuraOwnershipByName(spellName, unit)
       end
     else
       _ClearAuraStateForGuidSpell(guid, sid)
+    end
+  end
+
+  if (not hasMine) and (not hasOther) then
+    local wantNorm = entry.normName
+    if wantNorm and _AuraHasNormName(unit, wantNorm, isDebuff) then
+      -- Conservative ownership fallback: if aura is present by name but we have no
+      -- player-confirmed timer, treat as "other" until proven mine.
+      hasOther = true
     end
   end
 

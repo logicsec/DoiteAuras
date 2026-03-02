@@ -5702,10 +5702,8 @@ local function CheckAuraConditions(data)
     end
     if ownerUnit then
       local _, _, _, isMine, isOther, mineKnown = _DoiteTrackAuraOwnership(useSpellIdOnly and auraSpellId or name, ownerUnit, useSpellIdOnly)
-
-      if ownerFilter == "mine" then
-        -- Strict for onlyMine: unknown ownership should not pass.
-        if not mineKnown or (not isMine) then
+      if mineKnown then
+        if ownerFilter == "mine" and not isMine then
           found = false
         end
       elseif ownerFilter == "others" then
